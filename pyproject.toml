@@ -1,0 +1,69 @@
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core.buildapi"
+
+
+[project]
+name = "hubbardml"
+dynamic = ["version"]
+description = "Equivariant machine learning library for learning from electronic structures."
+authors = [{ name = "Martin Uhrin", email = "martin.uhrin.10@ucl.ac.uk" }]
+readme = "README.md"
+license = { file = "LICENSE" }
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "License :: OSI Approved :: GNU Lesser General Public License v3 or later (LGPLv3+)",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS :: MacOS X",
+    "Programming Language :: Python",
+    'Programming Language :: Python :: 3.7',
+    'Programming Language :: Python :: 3.8',
+    'Programming Language :: Python :: 3.9',
+    'Programming Language :: Python :: 3.10',
+    "Topic :: Scientific/Engineering"
+]
+keywords = ["machine learning", "equivariant", "electronic structure"]
+requires-python = ">=3.7"
+dependencies = [
+    "e3nn",
+    "e3psi",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "torch",
+]
+[project.optional-dependencies]
+dev = [
+    'black[d]',
+    'flit',
+    'pre-commit',
+    'pytest',
+]
+
+[tool.black]
+line-length = 120
+target-version = ['py37', 'py38', 'py39', 'py310']
+include = '\.pyi?$'
+exclude = '''
+
+(
+  /(
+      \.eggs         # exclude a few common directories in the
+    | \.git          # root of the project
+    | \.hg
+    | \.mypy_cache
+    | \.tox
+    | \.venv
+    | _build
+    | buck-out
+    | build
+    | (.*)/migrations
+    | dist
+  )/
+)
+'''
+[tool.commitizen]
+tag_format = "v$major.$minor.$patch"
+
+[tool.bandit]
+exclude_dirs = ["tests"]

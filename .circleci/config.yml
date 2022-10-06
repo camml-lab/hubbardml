@@ -1,0 +1,40 @@
+# Python CircleCI 2.0 configuration file
+version: 2
+jobs:
+  build:
+    docker:
+      - image: circleci/python:3.7
+
+    working_directory: ~/repo
+
+    steps:
+      # Step 1: obtain repo from GitHub
+      - checkout
+      # Step 2: create virtual env and install dependencies
+      - run:
+          name: install dependencies
+          command: |
+            python3 -m venv venv
+            . venv/bin/activate
+            pip install -r requirements.txt --quiet
+            pip install coveralls
+            curl -L https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64 > ./cc-test-reporter
+            chmod +x ./cc-test-reporter
+            # Install deepsource CLI
+            curl https://deepsource.io/cli | sh
+      # Step 3: run linter and tests
+      - run:
+          name: run tests
+          command: |
+            . venv/bin/activate
+            ./cc-test-reporter before-build
+            pytest -vv --cov-report html --cov-report xml --cov=.
+            flake8 --exclude=venv* --statistics --exit-zero
+            coveralls
+            ./cc-test-reporter after-build --coverage-input-type coverage.py
+            # Report coverage artifact to 'test-coverage' analyzer
+            ./bin/deepsource report --analyzer test-coverage --key python --value-file ./coverage.xml
+      - store_artifacts:
+          path: htmlcov
+      - store_artifacts:
+          path: coverage.xml

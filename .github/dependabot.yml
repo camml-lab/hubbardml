@@ -1,0 +1,13 @@
+version: 2
+updates:
+- package-ecosystem: pip
+  directory: "/"
+  schedule:
+    interval: daily
+    time: "03:00"
+    timezone: Africa/Lusaka
+  labels:
+    - "cookiecutter"
+    - "dependencies"
+    - "python"
+  open-pull-requests-limit: 99
