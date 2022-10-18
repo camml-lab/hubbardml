@@ -1,4 +1,5 @@
-from typing import List, Dict
+import itertools
+import math
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -8,15 +9,18 @@ import pandas as pd
 from . import keys
 
 plot_colours = [
-    "#bf016b",
-    "#999999",
     "#222222",
-    # '#ffffff',
+    "#BF016B",
+    "#999999",
+    # '#FFFFFF',
 ]
 
 colourmap = matplotlib.colors.ListedColormap(plot_colours, name="pinkblack")
 
-colours = {
+parameter_colours = dict(zip((keys.PARAM_U, keys.PARAM_V), plot_colours))
+hp_ml_colours = dict(zip((keys.PARAM_OUT, keys.PARAM_OUT_PREDICTED), plot_colours))
+
+element_colours = {
     "C": "#909090",
     "Ni": "#50D050",
     "O": "#FF0D0D",
@@ -74,71 +78,68 @@ def create_parity_plot(df, axis_label=None, title=None):
     return fig
 
 
-def create_progression_plots(df, yrange: float = None):
-    IN_PAIR = "atom_pair_in_name"
-    calculated_colours = {
-        "test": "#bf016b",
-        "train": "#c28aa9",
-    }
-    predicted_colours = {"test": "#222222", "train": "#666666"}
+def create_progression_plots(df, root_path, yrange: float = None, num_cols=3):
+    sc_frame = df[df[keys.DIR].str.startswith(root_path)]
 
-    df = df.copy()
+    # Get atom index pairs
+    pairs = sc_frame.apply(lambda row: (row[keys.ATOM_1_IDX], row[keys.ATOM_2_IDX]), axis=1)
+    unique_pairs = pairs.unique()
 
-    def create_label_pairs(row):
-        return " ".join(frozenset([row[keys.ATOM_1_IN_NAME], row[keys.ATOM_2_IN_NAME]]))
+    num_rows = math.ceil(len(unique_pairs) / 3)
 
-    df[IN_PAIR] = df.apply(create_label_pairs, axis=1)
+    fig = plt.figure(figsize=(6 * num_cols, 4 * num_rows))
+    gs = fig.add_gridspec(num_rows, num_cols, hspace=0)
+    axs = gs.subplots(
+        sharex="col",
+    )
+    fig.suptitle(sc_frame.iloc[0][keys.DIR], y=0.9)
 
-    plots = {}
-    for pair_name in df[IN_PAIR].unique():
-        fig = plt.figure(figsize=(6, 4))
-        plots[pair_name] = fig
-        plt.title(str(pair_name))
+    axs = list(itertools.chain(*axs))
+    for pair, ax in zip(unique_pairs, axs):
+        pair_rows = sc_frame[sc_frame.index.isin(pairs[pairs == pair].index)]
+        sorted_df = pair_rows.sort_values(by=[keys.UV_ITER])
+        iters = sorted_df[keys.UV_ITER]
+        row = sorted_df.iloc[0]
 
-        # Go to the first step
-        step = sorted(list(df[df[IN_PAIR] == pair_name][keys.UV_ITER]))[0]
-        row = df[(df[IN_PAIR] == pair_name) & (df[keys.UV_ITER] == step)].iloc[0]
-
-        steps = []
-        predicted = []
-        calculated = []
-        predicted_category = []
-        calculated_category = []
-        while row is not None:
-            steps.append(step)
-            predicted.append(row[keys.PARAM_OUT_PREDICTED])
-            calculated.append(row[keys.PARAM_OUT])
-
-            cat = row[keys.TRAINING_LABEL]
-            predicted_category.append(predicted_colours[cat])
-            calculated_category.append(calculated_colours[cat])
-
-            # Move on to next row.
-            # 1. Relabel the pair
-            # pair_name = frozenset([row[keys.ATOM_1_OUT_NAME], row[keys.ATOM_2_OUT_NAME]])
-            # 2. Get the next row
-            try:
-                df_sorted = df[(df[IN_PAIR] == pair_name) & (df[keys.UV_ITER] > step)]
-                row = df_sorted.sort_values(keys.UV_ITER).iloc[0]
-            except IndexError:
-                row = None
-            else:
-                step = row[keys.UV_ITER]
+        # Set up the axes
+        ax.set_title(
+            "".join(map(str, [row[keys.ATOM_1_IN_NAME], row[keys.ATOM_1_IN_NAME]])),
+            y=0.85,
+        )
 
         if yrange is not None:
-            midpoint = np.vstack((calculated, predicted)).mean()
-            plt.ylim((midpoint - 0.5 * yrange, midpoint + 0.5 * yrange))
+            param_values = sorted_df[keys.PARAM_OUT].tolist()
+            if keys.PARAM_OUT_PREDICTED in sorted_df:
+                param_values.extend(sorted_df[keys.PARAM_OUT_PREDICTED].tolist())
 
-        plt.plot(steps, calculated, label="HP", c="#bf016b", marker="o", linestyle="dashed")
-        plt.plot(steps, predicted, label="ML", c="#222222", marker="o", linestyle="dashed")
-        plt.xlabel("Iteration")
+            midpoint = np.mean(param_values)
+            ax.set_ylim((midpoint - 0.5 * yrange, midpoint + 0.5 * yrange))
 
-        ax = fig.gca()
+        ax.plot(
+            iters.tolist(),
+            sorted_df[keys.PARAM_OUT].tolist(),
+            label="HP",
+            c=hp_ml_colours[keys.PARAM_OUT],
+            marker="o",
+            linestyle="dashed",
+        )
+        if keys.PARAM_OUT_PREDICTED in sorted_df:
+            ax.plot(
+                iters,
+                sorted_df[keys.PARAM_OUT_PREDICTED],
+                label="ML",
+                c=hp_ml_colours[keys.PARAM_OUT_PREDICTED],
+                marker="o",
+                linestyle="dashed",
+            )
+
         ax.xaxis.set_major_locator(matplotlib.ticker.MaxNLocator(integer=True))
+        ax.set_xlabel("Iteration")
+        ax.set_ylabel(f"Hubbard ${row[keys.PARAM_TYPE]}$ (eV)")
 
-        plt.legend()
+        ax.legend()
 
-    return plots
+    return fig
 
 
 def split_plot(df, category_key, axis_label=None, title=None):

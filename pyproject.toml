@@ -25,9 +25,11 @@ classifiers = [
 keywords = ["machine learning", "equivariant", "electronic structure"]
 requires-python = ">=3.7"
 dependencies = [
+    "ase",
     "e3nn",
     "e3psi",
     "matplotlib",
+    "mincepy[sci]",
     "numpy",
     "pandas",
     "torch",
@@ -39,6 +41,10 @@ dev = [
     'pre-commit',
     'pytest',
 ]
+[project.scripts]
+hml = "hubbardml.cli:hml"
+[project.entry-points."mincepy.plugins.types"]
+ "hubbardml" = "hubbardml.provides:get_mincepy_types"
 
 [tool.black]
 line-length = 120

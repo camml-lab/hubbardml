@@ -19,6 +19,7 @@ PARAM_IN = "param_in"  # The input parameter to hp (i.e. either the value of U o
 PARAM_TYPE = "param_type"  # The parameter type of that particular row
 PARAM_OUT = "param_out"  # The output parameter as calculated by hp
 PARAM_DELTA = "param_delta"  # PARAM_OUT - PARAM_IN
+PARAM_OUT_FINAL = "param_final"  # The output parameter value of the final self-consistent iteration
 # Misc
 IS_VDW = "is_vdw"
 DIR = "dir"
@@ -43,10 +44,8 @@ ATOM_2_IDX = "atom_2_idx"
 ATOM_2_IDX_UC = "atom_2_idx_uc"
 
 # Calculated properties
-OCCU_MEAN_1 = "occu_mean_1"
-OCCU_MEAN_2 = "occu_mean_2"
 ATOM_1_OCCS_INV_1 = "atom_1_occs_inv_1"
-ATOM_1_OCCS_INV_2 = "atom_1_occs_inv_1"
+ATOM_1_OCCS_INV_2 = "atom_1_occs_inv_2"
 ATOM_2_OCCS_INV_1 = "atom_2_occs_inv_1"
 ATOM_2_OCCS_INV_2 = "atom_2_occs_inv_2"
 N_ATOM_UC = "n_atoms_uc"
@@ -68,3 +67,4 @@ COLOUR = "colour"
 ITER = "iter"
 TRAIN_LOSS = "train_loss"
 TEST_LOSS = "test_loss"
+LABEL = "label"

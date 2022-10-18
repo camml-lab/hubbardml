@@ -1,5 +1,8 @@
 import collections
+import uuid
 from typing import List, Optional, Callable
+
+import mincepy
 
 import e3psi
 import pandas as pd
@@ -10,7 +13,7 @@ from . import models
 from . import plots
 from . import utils
 
-__all__ = "TrainingResult", "TrainingInfo", "Trainer", "train_hubbard_u", "train_hubbard_v"
+__all__ = "TrainingResult", "TrainingInfo", "Trainer", "train_model"
 
 TrainingResult = collections.namedtuple("TrainingResult", "model df trainer")
 TrainingInfo = collections.namedtuple("TrainingInfo", "iter train_loss test_loss")
@@ -19,8 +22,8 @@ TRAIN_OVERFITTING = "overfitting"
 TRAIN_STOP = "stop"
 
 
-def train_hubbard_u(
-    df: pd.DataFrame, label: str, species: List[str] = None, create_plots=True, max_iters=20000
+def train_model(
+    param_type: str, df: pd.DataFrame, label: str, species: List[str] = None, create_plots=True, max_iters=30000
 ) -> TrainingResult:
     dtype = torch.float64
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -28,25 +31,16 @@ def train_hubbard_u(
     species = species or list(df[keys.ATOM_1_ELEMENT].unique())
 
     # Create the model
-    model = models.UModel(species)
+    if param_type == "V":
+        model = models.VModel(species)
+    if param_type == "U":
+        model = models.UModel(species)
+    else:
+        raise ValueError(f"Parameter type must be 'U' or 'V', got {param_type}")
+
     model.to(dtype=dtype, device=device)
 
-    return _do_train(model, "U", df, create_plots=create_plots, label=label, max_iters=max_iters)
-
-
-def train_hubbard_v(
-    df: pd.DataFrame, label: str, species: List[str] = None, create_plots=True, max_iters=30000
-) -> TrainingResult:
-    dtype = torch.float64
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    species = species or list(df[keys.ATOM_1_ELEMENT].unique())
-
-    # Create the model
-    model = models.VModel(species)
-    model.to(dtype=dtype, device=device)
-
-    return _do_train(model, "V", df, create_plots=create_plots, label=label, max_iters=max_iters)
+    return _do_train(model, param_type, df, create_plots=create_plots, label=label, max_iters=max_iters)
 
 
 def train(
@@ -100,7 +94,11 @@ def train(
     return TRAIN_MAX_ITERS
 
 
-class Trainer:
+class Trainer(mincepy.SavableObject):
+    TYPE_ID = uuid.UUID("97310848-2192-4766-bbb0-34bb7b122182")
+
+    model = mincepy.field("_model", store_as="model", ref=True)
+
     @classmethod
     def from_frame(
         cls,
@@ -150,6 +148,7 @@ class Trainer:
         output_test,
         overfitting_window=10,
     ):
+        super().__init__()
         self._model = model
         self._opt = opt
         self._loss_fn = loss_fn
@@ -213,6 +212,25 @@ class Trainer:
     def _train_callback(self, info: TrainingInfo):
         self._training_progress.append(info)
 
+    def to(self, device):
+        self._model.to(device=device)
+        self._input_train = _to(self._input_train, device)
+        self._output_train = _to(self._output_train, device)
+        self._input_test = _to(self._input_test, device)
+        self._output_test = _to(self._output_test, device)
+
+
+def _to(obj, device):
+    if isinstance(obj, torch.Tensor):
+        return obj.to(device=device)
+    elif isinstance(obj, dict):
+        for key, value in obj.items():
+            obj[key] = _to(value, device)
+
+        return obj
+    else:
+        raise TypeError(obj)
+
 
 def _do_train(model, param_type, df, create_plots: bool, label: str, max_iters=20000):
     if param_type not in ("U", "V"):
@@ -228,8 +246,7 @@ def _do_train(model, param_type, df, create_plots: bool, label: str, max_iters=2
     )
 
     # Train the model
-    outcome = trainer.train(callback=print, callback_period=50, max_iters=max_iters)
-    print(outcome)
+    trainer.train(callback=print, callback_period=50, max_iters=max_iters)
 
     # Set the predicted values in the dataframe
     predicted = model(trainer.input_test).detach().cpu().numpy().reshape(-1)
@@ -264,3 +281,6 @@ def _do_train(model, param_type, df, create_plots: bool, label: str, max_iters=2
 
 def _plotfile_name(label: str, plot_type: str):
     return f"plots/{label}_{plot_type}.pdf"
+
+
+HISTORIAN_TYPES = (Trainer,)

@@ -1,15 +1,104 @@
 import collections
+import math
 import uuid
-from typing import List, Dict, Tuple
+from typing import Dict, Tuple, Iterable
 
+from e3nn import o3
 import e3psi
+import numpy as np
 import pandas as pd
 import torch
 
+from . import datasets
 from . import keys
+from . import plots
 from . import sites
 
-__all__ = "VGraph", "UGraph"
+__all__ = "VGraph", "UGraph", "UVGraph"
+
+SPECIES = "species"
+U_MODEL = "U"
+V_MODEL = "V"
+UV_MODEL = "UV"
+
+
+# Convenience function for finding the correct column based on site and occupation index
+def key(prop: str, atom_idx: int, occs_idx: int = None):
+    if occs_idx is None:
+        return f"atom_{atom_idx}_{prop}"
+
+    return f"atom_{atom_idx}_{prop}_{occs_idx}"
+
+
+class UGraph(e3psi.IrrepsObj):
+    """A d-block site"""
+
+    TYPE_ID = uuid.UUID("4d7951c8-5fc7-4c9d-883e-ef09d27f478c")
+
+    def __init__(self, species: Iterable[str]) -> None:
+        super().__init__()
+        self.site = sites.DSite(species)
+
+    def create_input(self, row, dtype=None, device=None) -> Dict:
+        """Create a tensor from a dataframe row or dictionary"""
+        site_tensor = self.site.create_tensor(
+            dict(
+                specie=row[keys.ATOM_1_ELEMENT],
+                occs_1=row[keys.ATOM_1_OCCS_INV_1],
+                occs_2=row[keys.ATOM_1_OCCS_INV_2],
+            ),
+            dtype=dtype,
+            device=device,
+        )
+        return dict(site=site_tensor)
+
+
+class UModel(e3psi.OnsiteModel):
+    """Hubbard +U model
+
+    Consist of a single node that carries information about the atomic specie and occupation matrix.
+    """
+
+    TYPE_ID = uuid.UUID("947373b7-6cfc-42f6-bbcb-279f88a02db2")
+
+    def __init__(
+        self,
+        species: Iterable[str],
+        nn_irreps_out=None,
+        interaction_order=2,
+    ) -> None:
+        graph = UGraph(species)
+        if nn_irreps_out is None:
+            nn_irreps_out = self._compress_non_scalars(o3.ReducedTensorProducts("ij=ji", i=graph.irreps).irreps_out)
+
+        super().__init__(graph, nn_irreps_out=nn_irreps_out, irreps_out="0e", interaction_order=interaction_order)
+
+        self._species = tuple(species)
+
+    @property
+    def species(self) -> Tuple[str]:
+        """Get the supported species"""
+        return self._species
+
+    @classmethod
+    def prepare_dataset(cls, df: pd.DataFrame) -> pd.DataFrame:
+        df[SPECIES] = df.apply(lambda row: frozenset([row[keys.ATOM_1_ELEMENT], row[keys.ATOM_2_ELEMENT]]), axis=1)
+        df[keys.LABEL] = df[keys.ATOM_1_ELEMENT]
+        df[keys.COLOUR] = df[keys.ATOM_1_ELEMENT].map(plots.element_colours)
+
+        return datasets.filter_dataset(
+            df,
+            param_type=keys.PARAM_U,
+            remove_vwd=True,
+            remove_zero_out=False,
+            remove_in_eq_out=False,
+        )
+
+    def _compress_non_scalars(self, irreps: o3.Irreps, factor=3.0) -> o3.Irreps:
+        return o3.Irreps(
+            o3._irreps._MulIr(int(math.ceil(float(mul_ir.mul) / factor)), mul_ir.ir) if mul_ir.ir.l != 0 else mul_ir
+            for mul_ir in irreps
+        )
 
 
 class VGraph(e3psi.TwoSite):
@@ -17,7 +106,7 @@ class VGraph(e3psi.TwoSite):
 
     uuid.UUID("be7f3ec5-7412-4a98-a71a-2ccf16e27dd1")
 
-    def __init__(self, species: List[str]):
+    def __init__(self, species: Iterable[str]):
         # Create the graph by supplying the sites
         super().__init__(sites.PSite(species), sites.DSite(species), sites.VEdge())
 
@@ -34,28 +123,26 @@ class VGraph(e3psi.TwoSite):
         kwargs = dict(dtype=dtype, device=device)
 
         # Do some sanity checks
-        _check_shape(row, f"atom_{pidx}_occs_1", (3, 3))
-        _check_shape(row, f"atom_{pidx}_occs_2", (3, 3))
+        _check_shape(row, key("occs_inv", pidx, 1), (3, 3))
+        _check_shape(row, key("occs_inv", pidx, 2), (3, 3))
 
-        _check_shape(row, f"atom_{didx}_occs_1", (5, 5))
-        _check_shape(row, f"atom_{didx}_occs_2", (5, 5))
+        _check_shape(row, key("occs_inv", didx, 2), (5, 5))
+        _check_shape(row, key("occs_inv", didx, 2), (5, 5))
 
         site1_tensor = self.site1.create_tensor(
             dict(
-                one=1,
-                specie=row[f"atom_{pidx}_element"],
-                occs_1=row[f"atom_{pidx}_occs_1"],
-                occs_2=row[f"atom_{pidx}_occs_2"],
+                specie=row[key("element", pidx)],
+                occs_1=row[key("occs_inv", pidx, 1)],
+                occs_2=row[key("occs_inv", pidx, 1)],
             ),
             **kwargs,
         )
 
         site2_tensor = self.site2.create_tensor(
             dict(
-                # one=1,
-                specie=row[f"atom_{didx}_element"],
-                occs_1=row[f"atom_{didx}_occs_1"],
-                occs_2=row[f"atom_{didx}_occs_2"],
+                specie=row[key("element", didx)],
+                occs_1=row[key("occs_inv", didx, 1)],
+                occs_2=row[key("occs_inv", didx, 2)],
             ),
             **kwargs,
         )
@@ -73,6 +160,9 @@ class VModel(e3psi.IntersiteModel):
     """Hubbard +V model"""
 
     TYPE_ID = uuid.UUID("4a647f9f-0f90-474a-928e-19691b576597")
+    # Columns to store the current p-block and d-block elements
+    P_ELEMENT = "p_element"
+    D_ELEMENT = "d_element"
 
     def __init__(
         self,
@@ -93,53 +183,116 @@ class VModel(e3psi.IntersiteModel):
         """Get the supported species"""
         return self._species
 
+    @classmethod
+    def prepare_dataset(cls, dataframe: pd.DataFrame) -> pd.DataFrame:
+        df = datasets.filter_dataset(
+            dataframe,
+            param_type=keys.PARAM_V,
+            remove_vwd=True,
+            remove_zero_out=False,
+            remove_in_eq_out=False,
+        )
 
-class UGraph(e3psi.IrrepsObj):
-    """A d-block site"""
+        df[SPECIES] = df.apply(lambda row: frozenset([row[keys.ATOM_1_ELEMENT], row[keys.ATOM_2_ELEMENT]]), axis=1)
+        df[cls.P_ELEMENT] = df.apply(
+            lambda row: row[keys.ATOM_1_ELEMENT] if row[keys.ATOM_1_OCCS_1].shape[0] == 3 else row[keys.ATOM_2_ELEMENT],
+            axis=1,
+        )
+        df[cls.D_ELEMENT] = df.apply(
+            lambda row: row[keys.ATOM_1_ELEMENT] if row[keys.ATOM_2_OCCS_1].shape[0] == 3 else row[keys.ATOM_2_ELEMENT],
+            axis=1,
+        )
+        df[keys.LABEL] = df.apply(lambda row: f"{row[cls.D_ELEMENT]}-{row[cls.P_ELEMENT]}", axis=1)
+        df[keys.COLOUR] = df[cls.D_ELEMENT].map(plots.element_colours)
 
-    TYPE_ID = uuid.UUID("4d7951c8-5fc7-4c9d-883e-ef09d27f478c")
+        return df
 
-    def __init__(self, species: List[str]) -> None:
-        super().__init__()
-        self.site = sites.DSite(species)
+
+class UVGraph(e3psi.TwoSite):
+    def __init__(self, species: Iterable[str]):
+        # Create the graph by supplying the sites
+        site = sites.PDSite(species)
+        super().__init__(site, site, sites.VEdge())
 
     def create_input(self, row, dtype=None, device=None) -> Dict:
-        """Create a tensor from a dataframe row or dictionary"""
-        site_tensor = self.site.create_tensor(
-            dict(
-                one=1,
-                specie=row[keys.ATOM_1_ELEMENT],
-                occs_1=row[keys.ATOM_1_OCCS_INV_1],
-                occs_2=row[keys.ATOM_1_OCCS_INV_2],
-            ),
-            dtype=dtype,
-            device=device,
+        kwargs = dict(dtype=dtype, device=device)  # General kwargs passed to create_tensor() calls
+
+        site_tensors = []
+        for site_idx in range(1, 3):  # Sites 1 and 2
+            occs_shape = row[key("occs_inv", site_idx, 1)].shape
+            if occs_shape[0] == 3:
+                block_idx = 0
+            elif occs_shape[0] == 5:
+                block_idx = 1
+            else:
+                raise ValueError(f"Unexpected occupations matrix shape: {occs_shape}")
+
+            # p, p, d, d
+            occs = ((np.ones((3, 3)), np.ones((3, 3))), (np.zeros((5, 5)), np.zeros((5, 5))))
+            for occs_idx in range(1, 3):  # Occupations 1 and 2
+                occs[block_idx][occs_idx - 1][:] = row[key("occs_inv", site_idx, occs_idx)]
+
+            site_tensor = self.site1.create_tensor(
+                dict(
+                    specie=row[key("element", site_idx)],
+                    p_occs_1=occs[0][0],
+                    p_occs_2=occs[0][1],
+                    d_occs_1=occs[1][0],
+                    d_occs_2=occs[1][1],
+                ),
+                **kwargs,
+            )
+            site_tensors.append(site_tensor)
+
+        edge_tensor = self.edge.create_tensor(dict(one=1, v=row[keys.PARAM_IN], dist=row[keys.DIST_IN]), **kwargs)
+
+        return dict(
+            site1=site_tensors[0],
+            site2=site_tensors[1],
+            edge=edge_tensor,
         )
-        return dict(site=site_tensor)
 
 
-class UModel(e3psi.OnsiteModel):
-    """Hubbard +U model"""
+class UVModel(e3psi.IntersiteModel):
+    """Hubbard +U+V model"""
 
-    TYPE_ID = uuid.UUID("4d7951c8-5fc7-4c9d-883e-ef09d27f478c")
+    # Columns to store the current p-block and d-block elements
+    P_ELEMENT = "p_element"
+    D_ELEMENT = "d_element"
 
     def __init__(
         self,
-        species: List[str],
-        nn_irreps_out=None,
-    ) -> None:
+        species,
+        n1n2_irreps_out="53x0e+2x1e+6x2e+4x3e+5x4e+2x5e+2x6e",
+        n1n2e_irreps_out="106x0e+4x1e+6x2e+8x3e+4x4e+2x5e+2x6e",
+    ):
         super().__init__(
-            UGraph(species),
-            nn_irreps_out=nn_irreps_out,
+            UVGraph(species),
+            n1n2_irreps_out=n1n2_irreps_out,
+            n1n2e_irreps_out=n1n2e_irreps_out,
             irreps_out="0e",
         )
-
         self._species = tuple(species)
 
     @property
-    def species(self) -> Tuple[str]:
+    def species(self) -> Tuple:
         """Get the supported species"""
         return self._species
+
+    @classmethod
+    def prepare_dataset(cls, dataframe: pd.DataFrame) -> pd.DataFrame:
+        df = datasets.filter_dataset(
+            dataframe,
+            remove_vwd=True,
+            remove_zero_out=False,
+            remove_in_eq_out=False,
+        )
+
+        df[SPECIES] = df.apply(lambda row: frozenset([row[keys.ATOM_1_ELEMENT], row[keys.ATOM_2_ELEMENT]]), axis=1)
+        df[keys.COLOUR] = df[keys.PARAM_TYPE].map(plots.parameter_colours)
+        df[keys.LABEL] = df.apply(lambda row: f"{ {row[keys.ATOM_1_ELEMENT], row[keys.ATOM_2_ELEMENT]} }", axis=1)
+
+        return df
 
 
 def create_model_inputs(graph, frame: pd.DataFrame, dtype=None, device=None) -> Dict[str, torch.Tensor]:
@@ -168,3 +321,12 @@ def make_predictions(model: e3psi.Model, frame: pd.DataFrame, dtype=None, device
 def _check_shape(row, key, expected: tuple):
     if not row[key].shape == expected:
         raise ValueError(f"Expected {key} to have shape {expected}, got {row[key].shape}")
+
+
+MODELS = {
+    U_MODEL: UModel,
+    V_MODEL: VModel,
+    UV_MODEL: UVModel,
+}
+
+HISTORIAN_TYPES = VModel, UModel

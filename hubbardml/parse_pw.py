@@ -4,6 +4,7 @@ import re
 from typing import List, Dict, Optional
 
 import ase
+import ase.io.espresso
 import numpy as np
 import pandas as pd
 
@@ -39,9 +40,11 @@ END_NSG = "exit write_nsg"
 START_FINAL_COORDINATES = "Begin final coordinates"
 END_END_FINAL_COORDINATES = "End final coordinates"
 
+# From: https://docs.python.org/3/library/re.html#simulating-scanf
+FLOAT_NUMBER = r"[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?"
 RE_ATOM_LINE = re.compile(r"\s+Atom:\s+(\d+)\s+Spin:\s+(\d+)")
 RE_CELL_PARAMETERS = re.compile(r"CELL_PARAMETERS \(alat=\s*([\.\d]+)\)")
-RE_ATOMIC_POS_LINE = re.compile(r"([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s*")
+RE_ATOMIC_POS_LINE = re.compile(rf"([^\s]+)\s+({FLOAT_NUMBER})\s+({FLOAT_NUMBER})\s+({FLOAT_NUMBER})*")
 RE_HUBBARD_ENTRY = re.compile(r"hubbard_v\((\d+),(\d+),(\d+)\)")
 
 
@@ -64,7 +67,7 @@ class PwInputs:
         self.system_blocks = self.system[RAW]
 
     def update_system(self, new_system):
-        """Take atomic positions and cell parameters from new_system and overwrite our current ones"""
+        """Take atomic positions and cell parameters from new_system and overwrite the current ones"""
         for key in (IN_ATOMIC_POSITIONS, IN_CELL_PARAMETERS):
             self.system_blocks[key] = new_system[key]
         self.system = parse_system(self.generate_output())
@@ -189,8 +192,9 @@ def _parse_atomic_positions(lines: List[str]) -> Dict:
             # Done parsing atoms
             break
 
-        kinds.append(match.groups()[0])
-        coords.append(np.fromstring(" ".join(match.groups()[1:]), sep=" "))
+        parts = line.split()
+        kinds.append(parts[0])
+        coords.append(np.fromstring(" ".join(parts[1:]), sep=" "))
 
     atoms[ATOM_POS] = np.stack(coords)
 
