@@ -5,9 +5,11 @@ from typing import Union
 import pandas as pd
 import torch
 
+import e3psi.models
 from . import datasets
 from . import keys
 from . import models
+from . import plots
 from . import training
 
 __all__ = ("Project",)
@@ -47,11 +49,13 @@ class Project:
         path: Union[str, pathlib.Path] = None,
         param_cutoff=DEFAULT_PARAM_CUTOFF,
         predict_final=False,
+        rescale="mean",
+        hidden_layers=None,
     ) -> "Project":
         """
 
         :param dataset:
-        :param model_type:
+        :param model_type: the model to use (U, V, UV, ...)
         :param split_dataset:
         :param training_split:
         :param optimiser:
@@ -80,16 +84,29 @@ class Project:
             target_param = keys.PARAM_OUT
 
         if param_cutoff is not None:
-            dataset = dataset[dataset[keys.PARAM_OUT] > param_cutoff]
+            dataset = dataset[dataset[target_param] > param_cutoff]
+
+        if rescale is not None:
+            rescaler = models.Rescaler.from_data(dataset[keys.PARAM_OUT], method=rescale)
+        else:
+            rescaler = None
 
         # Create the classes we need
         model_class = models.MODELS[model_type]
         dataset = model_class.prepare_dataset(dataset)
-        species = list(pd.concat((dataset[keys.ATOM_1_ELEMENT], dataset[keys.ATOM_2_ELEMENT])).unique())
-        model = model_class(species=species)
+        species = list(
+            pd.concat((dataset[keys.ATOM_1_ELEMENT], dataset[keys.ATOM_2_ELEMENT])).unique()
+        )
+        # Create the model
+        models_kwargs = dict(species=species, irrep_normalization="component", rescaler=rescaler)
+        if hidden_layers is not None:
+            models_kwargs["hidden_layers"] = hidden_layers
+        model = model_class(**models_kwargs)
 
         if split_dataset:
-            dataset = datasets.split(dataset, method="category", frac=training_split, category=[models.SPECIES])
+            dataset = datasets.split(
+                dataset, method="category", frac=training_split, category=[models.SPECIES]
+            )
 
         trainer = training.Trainer.from_frame(
             model,
@@ -145,8 +162,10 @@ class Project:
         return self._dataset
 
     @property
-    def test_percentage(self) -> float:
-        return float(sum(self.dataset[keys.TRAINING_LABEL] == keys.TEST)) / float(len(self.dataset))
+    def validate_percentage(self) -> float:
+        return float(sum(self.dataset[keys.TRAINING_LABEL] == keys.VALIDATE)) / float(
+            len(self.dataset)
+        )
 
     def save(self):
         torch.save(self.trainer, self.path / self.TRAINER)
@@ -154,7 +173,8 @@ class Project:
 
     def train(
         self,
-        max_iters=10000,
+        min_iters=5_000,
+        max_iters=training.DEFAULT_MAX_ITERS,
         print_output=True,
         overfitting_window=None,
     ) -> str:
@@ -162,21 +182,90 @@ class Project:
         if overfitting_window is not None:
             self.trainer.overfitting_window = overfitting_window
 
-        return self.trainer.train(max_iters=max_iters, callback=callback, callback_period=50)
+        return self.trainer.train(
+            min_iters=min_iters, max_iters=max_iters, callback=callback, callback_period=50
+        )
 
     def infer(self) -> pd.DataFrame:
-        predicted = self.model(self.trainer.input_test).detach().cpu().numpy().reshape(-1)
+        predicted = self.model(self.trainer.input_validate).detach().cpu().numpy().reshape(-1)
         predicted_train = self.model(self.trainer.input_train).detach().cpu().numpy().reshape(-1)
 
         df = self.dataset
-        # Get the indices of the training and test data
+        # Get the indices of the training and validate data
         train_idx = df[df[keys.TRAINING_LABEL] == keys.TRAIN].index
-        test_idx = df[df[keys.TRAINING_LABEL] == keys.TEST].index
+        validate_idx = df[df[keys.TRAINING_LABEL] == keys.VALIDATE].index
 
-        df.loc[test_idx, keys.PARAM_OUT_PREDICTED] = predicted
+        df.loc[validate_idx, keys.PARAM_OUT_PREDICTED] = predicted
         df.loc[train_idx, keys.PARAM_OUT_PREDICTED] = predicted_train
 
         return df
 
     def to(self, device):
         self.trainer.to(device)
+
+    def save_training_plots(self, plot_path="plots/", label="", format="pdf"):
+        self = self
+        if isinstance(self.model, models.UModel):
+            param_type = "U"
+        elif isinstance(self.model, models.VModel):
+            param_type = "V"
+        elif isinstance(self.model, models.UVModel):
+            param_type = "UV"
+        else:
+            raise ValueError(f"Unknown model type: {self.model.__class__.__name__}")
+
+        def _plot_path(plot_type: str) -> pathlib.Path:
+            parts = [param_type]
+            if label:
+                parts.append(label)
+            parts.append(plot_type)
+
+            path = pathlib.Path(plot_path) / f"{'_'.join(parts)}.{format}"
+            return path
+
+        df = self.infer()
+        validate_rmse = datasets.rmse(df)
+
+        # Get the indices of the validation data
+        validate_idx = df[df[keys.TRAINING_LABEL] == keys.VALIDATE].index
+        # Validation frame
+        df_validate = df.loc[validate_idx]
+
+        trainer = self.trainer
+
+        # TRAINING CURVE
+        training_fig = trainer.plot_training_curves(logscale=True)
+        training_fig.savefig(_plot_path("training_curve"), bbox_inches="tight")
+
+        # TEST/VALIDATE PARITY
+        parity_fig = plots.create_parity_plot(
+            df,
+            axis_label=f"Hubbard ${param_type}$ (eV)",
+            title=f"RMSE = {_to_mev_string(validate_rmse)} ({self.validate_percentage:.2f} holdout)",
+        )
+        parity_fig.savefig(_plot_path("parity_validate"), bbox_inches="tight")
+
+        # VALIDATE BY SPECIES
+        parity_species_fig = plots.split_plot(
+            df_validate,
+            keys.LABEL,
+            axis_label=f"Hubbard ${param_type}$ (eV)",
+            title=f"Validate data ({self.validate_percentage * 100:.0f}%), RMSE = {_to_mev_string(validate_rmse)}",
+        )
+        parity_species_fig.savefig(_plot_path("parity_species"), bbox_inches="tight")
+
+        # Iteration progression
+        num_cols = 6
+        num_rows = 5
+        progression_plot = plots.create_progression_plots(
+            df[df[keys.PARAM_OUT] > 0.25],
+            yrange=0.4,
+            num_cols=num_cols,
+            max_plots=num_cols * num_rows,
+            scale=0.55,
+        )
+        progression_plot.savefig(_plot_path("convergence"), bbox_inches="tight")
+
+
+def _to_mev_string(energy):
+    return f"{energy * 1000:.0f} meV"

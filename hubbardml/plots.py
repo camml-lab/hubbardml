@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from . import datasets
 from . import keys
 
 plot_colours = [
@@ -19,6 +20,11 @@ colourmap = matplotlib.colors.ListedColormap(plot_colours, name="pinkblack")
 
 parameter_colours = dict(zip((keys.PARAM_U, keys.PARAM_V), plot_colours))
 hp_ml_colours = dict(zip((keys.PARAM_OUT, keys.PARAM_OUT_PREDICTED), plot_colours))
+train_validate_colours = {
+    keys.TRAIN: plot_colours[2],
+    keys.VALIDATE: plot_colours[1],
+    keys.TEST: plot_colours[0],
+}
 
 element_colours = {
     "C": "#909090",
@@ -38,8 +44,30 @@ def _minmax(df, *keys):
     return minval, maxval
 
 
-def create_parity_plot(df, axis_label=None, title=None):
-    test = df[df[keys.TRAINING_LABEL] == keys.TEST]
+def plot_series(ax, xdat, ydat, color, label):
+    ax.plot(
+        xdat,
+        ydat,
+        c=color,
+        marker="o",
+        alpha=1,
+        linestyle="dashed",
+        markerfacecolor="white",
+        zorder=1,
+    )
+    ax.scatter(
+        xdat,
+        ydat,
+        label=label,
+        c=color,
+        marker=matplotlib.markers.MarkerStyle("o", fillstyle="none"),
+        s=50,
+        zorder=2,
+    )
+
+
+def create_parity_plot(df, axis_label=None, title=None) -> plt.Figure:
+    validate = df[df[keys.TRAINING_LABEL] == keys.VALIDATE]
     train = df[df[keys.TRAINING_LABEL] == keys.TRAIN]
 
     fig = plt.figure(figsize=(4, 4))
@@ -66,85 +94,109 @@ def create_parity_plot(df, axis_label=None, title=None):
         c=train[keys.COLOUR],
     )
     plt.scatter(
-        test[keys.PARAM_OUT],
-        test[keys.PARAM_OUT_PREDICTED],
-        label="Test",
+        validate[keys.PARAM_OUT],
+        validate[keys.PARAM_OUT_PREDICTED],
+        label="Validate",
         s=42,
         alpha=0.5,
-        c=test[keys.COLOUR],
+        c=validate[keys.COLOUR],
     )
     plt.legend()
 
     return fig
 
 
-def create_progression_plots(df, root_path, yrange: float = None, num_cols=3):
-    sc_frame = df[df[keys.DIR].str.startswith(root_path)]
+def create_progression_plots(df, yrange: float = None, num_cols=3, max_plots=None, scale=1.0):
+    paths = datasets.get_self_consistent_paths(df)
+    total = 0
+    for path in paths:
+        sc_frame = df[df[keys.DIR].str.startswith(path)]
+        pairs = sc_frame.apply(lambda row: (row[keys.ATOM_1_IDX], row[keys.ATOM_2_IDX]), axis=1)
+        total += len(pairs.unique())
 
-    # Get atom index pairs
-    pairs = sc_frame.apply(lambda row: (row[keys.ATOM_1_IDX], row[keys.ATOM_2_IDX]), axis=1)
-    unique_pairs = pairs.unique()
+    if max_plots is not None:
+        total = min(total, max_plots)
+    num_rows = math.ceil(total / num_cols)
+    # fig = plt.figure(figsize=(6 * scale * num_cols, 4 * scale * num_rows))
+    # gs = fig.add_gridspec(num_rows, num_cols)
+    # axs = gs.subplots(sharex="col")
 
-    num_rows = math.ceil(len(unique_pairs) / 3)
-
-    fig = plt.figure(figsize=(6 * num_cols, 4 * num_rows))
-    gs = fig.add_gridspec(num_rows, num_cols, hspace=0)
-    axs = gs.subplots(
-        sharex="col",
+    fig, axs = plt.subplots(
+        nrows=num_rows,
+        ncols=num_cols,
+        sharex=True,
+        figsize=(6 * scale * num_cols, 4 * scale * num_rows),
     )
-    fig.suptitle(sc_frame.iloc[0][keys.DIR], y=0.9)
 
-    axs = list(itertools.chain(*axs))
-    for pair, ax in zip(unique_pairs, axs):
-        pair_rows = sc_frame[sc_frame.index.isin(pairs[pairs == pair].index)]
-        sorted_df = pair_rows.sort_values(by=[keys.UV_ITER])
-        iters = sorted_df[keys.UV_ITER]
-        row = sorted_df.iloc[0]
+    # Set axes labels on outermost subplots
+    for row in range(num_rows):
+        ax = axs[row][0]
+        ax.set_ylabel(f"Hubbard ${df.iloc[0][keys.PARAM_TYPE]}$ (eV)")
 
-        # Set up the axes
-        ax.set_title(
-            "".join(map(str, [row[keys.ATOM_1_IN_NAME], row[keys.ATOM_1_IN_NAME]])),
-            y=0.85,
-        )
-
-        if yrange is not None:
-            param_values = sorted_df[keys.PARAM_OUT].tolist()
-            if keys.PARAM_OUT_PREDICTED in sorted_df:
-                param_values.extend(sorted_df[keys.PARAM_OUT_PREDICTED].tolist())
-
-            midpoint = np.mean(param_values)
-            ax.set_ylim((midpoint - 0.5 * yrange, midpoint + 0.5 * yrange))
-
-        ax.plot(
-            iters.tolist(),
-            sorted_df[keys.PARAM_OUT].tolist(),
-            label="HP",
-            c=hp_ml_colours[keys.PARAM_OUT],
-            marker="o",
-            linestyle="dashed",
-        )
-        if keys.PARAM_OUT_PREDICTED in sorted_df:
-            ax.plot(
-                iters,
-                sorted_df[keys.PARAM_OUT_PREDICTED],
-                label="ML",
-                c=hp_ml_colours[keys.PARAM_OUT_PREDICTED],
-                marker="o",
-                linestyle="dashed",
-            )
-
+    for col in range(num_cols):
+        ax = axs[-1][col]
         ax.xaxis.set_major_locator(matplotlib.ticker.MaxNLocator(integer=True))
         ax.set_xlabel("Iteration")
-        ax.set_ylabel(f"Hubbard ${row[keys.PARAM_TYPE]}$ (eV)")
 
-        ax.legend()
+    axs = list(itertools.chain(*axs))
+
+    axis_no = 0
+    for path in paths:
+        sc_frame = df[df[keys.DIR].str.startswith(path)]
+
+        # Get atom index pairs
+        pairs = sc_frame.apply(lambda row: (row[keys.ATOM_1_IDX], row[keys.ATOM_2_IDX]), axis=1)
+        unique_pairs = pairs.unique()
+
+        for pair in unique_pairs:
+            ax = axs[axis_no]
+            pair_rows = sc_frame[sc_frame.index.isin(pairs[pairs == pair].index)]
+            sorted_df = pair_rows.sort_values(by=[keys.UV_ITER])
+            iters = sorted_df[keys.UV_ITER]
+            row = sorted_df.iloc[0]
+
+            # Set up the axes
+            ax.set_title(
+                "".join(map(str, [row[keys.ATOM_1_IN_NAME], row[keys.ATOM_2_IN_NAME]])),
+                y=0.8,
+            )
+
+            if yrange is not None:
+                param_values = sorted_df[keys.PARAM_OUT].tolist()
+                if keys.PARAM_OUT_PREDICTED in sorted_df:
+                    param_values.extend(sorted_df[keys.PARAM_OUT_PREDICTED].tolist())
+
+                midpoint = np.mean(param_values)
+                ax.set_ylim((midpoint - 0.5 * yrange, midpoint + 0.5 * yrange))
+
+            plot_series(
+                ax,
+                iters.tolist(),
+                sorted_df[keys.PARAM_OUT].tolist(),
+                color=hp_ml_colours[keys.PARAM_OUT],
+                label="HP",
+            )
+
+            if keys.PARAM_OUT_PREDICTED in sorted_df:
+                plot_series(
+                    ax,
+                    iters,
+                    sorted_df[keys.PARAM_OUT_PREDICTED],
+                    color=hp_ml_colours[keys.PARAM_OUT_PREDICTED],
+                    label="ML",
+                )
+
+            ax.legend()
+            axis_no += 1
+
+            if max_plots is not None and axis_no >= max_plots:
+                return fig
 
     return fig
 
 
 def split_plot(df, category_key, axis_label=None, title=None):
     categories = df[category_key].unique()
-    # test_elements = np.array(df.iloc[test_indices][keys.ATOM_1_ELEMENT])
     fig = plt.figure(figsize=(4, 4))
     fig.suptitle(title)
 
@@ -154,7 +206,7 @@ def split_plot(df, category_key, axis_label=None, title=None):
 
     plt.plot(ranges, ranges, c=plot_colours[1])
     for category in categories:
-        # For the test set extract the rows for this specie
+        # For the validate set extract the rows for this specie
         subset = df[df[category_key] == category]
 
         vals = subset[keys.PARAM_OUT]
@@ -175,7 +227,7 @@ def split_plot(df, category_key, axis_label=None, title=None):
     return fig
 
 
-def plot_training_curves(training_run: pd.DataFrame, logscale=True):
+def plot_training_curves(training_run: pd.DataFrame, logscale=True) -> plt.Figure:
     fig = plt.figure(figsize=(6, 3))
     fig.suptitle("Training curves")
 
@@ -188,16 +240,16 @@ def plot_training_curves(training_run: pd.DataFrame, logscale=True):
         training_run[keys.TRAIN_LOSS],
         s=5,
         label="Train",
-        c=plot_colours[0],
+        c=train_validate_colours[keys.TRAIN],
         alpha=0.8,
     )
-    if keys.TEST_LOSS in training_run:
+    if keys.VALIDATE_LOSS in training_run:
         plt.scatter(
             training_run[keys.ITER],
-            training_run[keys.TEST_LOSS],
+            training_run[keys.VALIDATE_LOSS],
             s=5,
-            label="Test",
-            c=plot_colours[1],
+            label="Validate",
+            c=train_validate_colours[keys.VALIDATE],
             alpha=0.8,
         )
     plt.legend()

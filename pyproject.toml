@@ -47,7 +47,7 @@ hml = "hubbardml.cli:hml"
  "hubbardml" = "hubbardml.provides:get_mincepy_types"
 
 [tool.black]
-line-length = 120
+line-length = 100
 target-version = ['py37', 'py38', 'py39', 'py310']
 include = '\.pyi?$'
 exclude = '''

@@ -1,6 +1,9 @@
 """Console script for hubbardml."""
+import pathlib
+
 import click
 
+import hubbardml.utils
 from . import projects
 
 
@@ -13,12 +16,27 @@ def hml():
 @click.argument("dataset")
 @click.option("-m", "--model", required=True)
 @click.option("-p", "--project", default=None)
-@click.option("--cutoff", default=projects.Project.DEFAULT_PARAM_CUTOFF, help="Drop all param_out less than this value")
-def new(dataset, model, project, cutoff):
+@click.option(
+    "--cutoff",
+    default=projects.Project.DEFAULT_PARAM_CUTOFF,
+    help="drop all param_out less than this value",
+)
+@click.option("--seed", default=0xDEADBEEF, type=int, help="the RNG seed")
+@click.option("--layers", default=1, type=int, help="the number of hidden layers in the model")
+def new(dataset, model, project, cutoff, seed, layers):
     """Create a new project."""
-    project = projects.Project.new(dataset, path=project, model_type=model, param_cutoff=cutoff)
+    hubbardml.utils.random_seed(seed)
+    project = projects.Project.new(
+        dataset,
+        path=project,
+        model_type=model,
+        param_cutoff=cutoff,
+        hidden_layers=layers,
+    )
     project.save()
-    click.echo(f"Path {project.path}, {len(project.dataset)} data points")
+    click.echo(f"Dataset: {len(project.dataset)} data points")
+    click.echo(f"Model:\n{project.model}")
+    click.echo(f"Path: {project.path.relative_to(pathlib.Path.cwd())}")
 
 
 @hml.command()

@@ -53,7 +53,7 @@ class UGraph(e3psi.IrrepsObj):
         return dict(site=site_tensor)
 
 
-class UModel(e3psi.OnsiteModel):
+class UModel(e3psi.models.OnsiteModel):
     """Hubbard +U model
 
     Consist of a single node that carries information about the atomic specie and occupation matrix.
@@ -64,14 +64,23 @@ class UModel(e3psi.OnsiteModel):
     def __init__(
         self,
         species: Iterable[str],
-        nn_irreps_out=None,
-        interaction_order=2,
+        nn_irreps_out="23x0e + 4x2e + 1x3e + 4x4e + 1x5e + 2x6e + 1x8e",
+        hidden_layers=1,
+        **kwargs,
     ) -> None:
         graph = UGraph(species)
         if nn_irreps_out is None:
-            nn_irreps_out = self._compress_non_scalars(o3.ReducedTensorProducts("ij=ji", i=graph.irreps).irreps_out)
+            nn_irreps_out = self._compress_non_scalars(
+                o3.ReducedTensorProducts("ij=ji", i=graph.irreps).irreps_out, factor=1.0
+            )
 
-        super().__init__(graph, nn_irreps_out=nn_irreps_out, irreps_out="0e", interaction_order=interaction_order)
+        super().__init__(
+            graph,
+            nn_irreps_out=nn_irreps_out,
+            irreps_out="0e",
+            hidden_layers=hidden_layers,
+            **kwargs,
+        )
 
         self._species = tuple(species)
 
@@ -82,7 +91,13 @@ class UModel(e3psi.OnsiteModel):
 
     @classmethod
     def prepare_dataset(cls, df: pd.DataFrame) -> pd.DataFrame:
-        df[SPECIES] = df.apply(lambda row: frozenset([row[keys.ATOM_1_ELEMENT], row[keys.ATOM_2_ELEMENT]]), axis=1)
+        # Remove non Hubbard active pairs
+        for elem in ("O", "S"):
+            df = df[~((df[keys.ATOM_1_ELEMENT] == elem) & (df[keys.ATOM_2_ELEMENT] == elem))]
+
+        df[SPECIES] = df.apply(
+            lambda row: frozenset([row[keys.ATOM_1_ELEMENT], row[keys.ATOM_2_ELEMENT]]), axis=1
+        )
         df[keys.LABEL] = df[keys.ATOM_1_ELEMENT]
         df[keys.COLOUR] = df[keys.ATOM_1_ELEMENT].map(plots.element_colours)
 
@@ -90,13 +105,15 @@ class UModel(e3psi.OnsiteModel):
             df,
             param_type=keys.PARAM_U,
             remove_vwd=True,
-            remove_zero_out=False,
+            remove_zero_out=True,
             remove_in_eq_out=False,
         )
 
     def _compress_non_scalars(self, irreps: o3.Irreps, factor=3.0) -> o3.Irreps:
         return o3.Irreps(
-            o3._irreps._MulIr(int(math.ceil(float(mul_ir.mul) / factor)), mul_ir.ir) if mul_ir.ir.l != 0 else mul_ir
+            o3._irreps._MulIr(int(math.ceil(float(mul_ir.mul) / factor)), mul_ir.ir)
+            if mul_ir.ir.l != 0
+            else mul_ir
             for mul_ir in irreps
         )
 
@@ -147,7 +164,9 @@ class VGraph(e3psi.TwoSite):
             **kwargs,
         )
 
-        edge_tensor = self.edge.create_tensor(dict(one=1, v=row[keys.PARAM_IN], dist=row[keys.DIST_IN]), **kwargs)
+        edge_tensor = self.edge.create_tensor(
+            dict(one=1, v=row[keys.PARAM_IN], dist=row[keys.DIST_IN]), **kwargs
+        )
 
         return dict(
             site1=site1_tensor,
@@ -169,12 +188,14 @@ class VModel(e3psi.IntersiteModel):
         species,
         n1n2_irreps_out="53x0e+2x1e+6x2e+4x3e+5x4e+2x5e+2x6e",
         n1n2e_irreps_out="106x0e+4x1e+6x2e+8x3e+4x4e+2x5e+2x6e",
+        **kwargs,
     ):
         super().__init__(
             VGraph(species),
             n1n2_irreps_out=n1n2_irreps_out,
             n1n2e_irreps_out=n1n2e_irreps_out,
             irreps_out="0e",
+            **kwargs,
         )
         self._species = tuple(species)
 
@@ -193,13 +214,27 @@ class VModel(e3psi.IntersiteModel):
             remove_in_eq_out=False,
         )
 
-        df[SPECIES] = df.apply(lambda row: frozenset([row[keys.ATOM_1_ELEMENT], row[keys.ATOM_2_ELEMENT]]), axis=1)
+        # Exclude all those that have P-P of D-D elements as this model can't deal with those
+        df = df[
+            ~df.apply(
+                lambda row: row[keys.ATOM_1_OCCS_1].shape[0] == row[keys.ATOM_2_OCCS_1].shape[0],
+                axis=1,
+            )
+        ]
+
+        df[SPECIES] = df.apply(
+            lambda row: frozenset([row[keys.ATOM_1_ELEMENT], row[keys.ATOM_2_ELEMENT]]), axis=1
+        )
         df[cls.P_ELEMENT] = df.apply(
-            lambda row: row[keys.ATOM_1_ELEMENT] if row[keys.ATOM_1_OCCS_1].shape[0] == 3 else row[keys.ATOM_2_ELEMENT],
+            lambda row: row[keys.ATOM_1_ELEMENT]
+            if row[keys.ATOM_1_OCCS_1].shape[0] == 3
+            else row[keys.ATOM_2_ELEMENT],
             axis=1,
         )
         df[cls.D_ELEMENT] = df.apply(
-            lambda row: row[keys.ATOM_1_ELEMENT] if row[keys.ATOM_2_OCCS_1].shape[0] == 3 else row[keys.ATOM_2_ELEMENT],
+            lambda row: row[keys.ATOM_1_ELEMENT]
+            if row[keys.ATOM_2_OCCS_1].shape[0] == 3
+            else row[keys.ATOM_2_ELEMENT],
             axis=1,
         )
         df[keys.LABEL] = df.apply(lambda row: f"{row[cls.D_ELEMENT]}-{row[cls.P_ELEMENT]}", axis=1)
@@ -244,7 +279,9 @@ class UVGraph(e3psi.TwoSite):
             )
             site_tensors.append(site_tensor)
 
-        edge_tensor = self.edge.create_tensor(dict(one=1, v=row[keys.PARAM_IN], dist=row[keys.DIST_IN]), **kwargs)
+        edge_tensor = self.edge.create_tensor(
+            dict(one=1, v=row[keys.PARAM_IN], dist=row[keys.DIST_IN]), **kwargs
+        )
 
         return dict(
             site1=site_tensors[0],
@@ -288,14 +325,49 @@ class UVModel(e3psi.IntersiteModel):
             remove_in_eq_out=False,
         )
 
-        df[SPECIES] = df.apply(lambda row: frozenset([row[keys.ATOM_1_ELEMENT], row[keys.ATOM_2_ELEMENT]]), axis=1)
+        df[SPECIES] = df.apply(
+            lambda row: frozenset([row[keys.ATOM_1_ELEMENT], row[keys.ATOM_2_ELEMENT]]), axis=1
+        )
         df[keys.COLOUR] = df[keys.PARAM_TYPE].map(plots.parameter_colours)
-        df[keys.LABEL] = df.apply(lambda row: f"{ {row[keys.ATOM_1_ELEMENT], row[keys.ATOM_2_ELEMENT]} }", axis=1)
+        df[keys.LABEL] = df.apply(
+            lambda row: f"{ {row[keys.ATOM_1_ELEMENT], row[keys.ATOM_2_ELEMENT]} }", axis=1
+        )
 
         return df
 
 
-def create_model_inputs(graph, frame: pd.DataFrame, dtype=None, device=None) -> Dict[str, torch.Tensor]:
+class Rescaler(e3psi.models.Module):
+    def __init__(self, shift=0.0, scale=1.0):
+        super().__init__()
+        self.shift = shift
+        self.scale = scale
+
+    def forward(self, data):
+        # y = mx + c
+        return self.scale * data + self.shift
+
+    def inverse(self, data):
+        # x = (y - c) / m
+        return (data - self.shift) / self.scale
+
+    @classmethod
+    def from_data(cls, dataset, method="mean") -> "Rescaler":
+        if method == "mean":
+            shift = np.mean(dataset)
+            scale = np.std(dataset)
+            return Rescaler(shift, scale)
+        elif method == "minmax":
+            dmin = np.min(dataset)
+            shift = dmin
+            scale = np.max(dataset) - dmin
+            return Rescaler(shift, scale)
+        else:
+            raise ValueError(f"Unknown method: {method}")
+
+
+def create_model_inputs(
+    graph, frame: pd.DataFrame, dtype=None, device=None
+) -> Dict[str, torch.Tensor]:
     """Given a graph this method will create a dictionary with stacked tensors for
     each of the inputs in the given dataframe"""
     inputs = collections.defaultdict(list)

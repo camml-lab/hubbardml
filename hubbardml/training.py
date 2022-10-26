@@ -16,31 +16,55 @@ from . import utils
 __all__ = "TrainingResult", "TrainingInfo", "Trainer", "train_model"
 
 TrainingResult = collections.namedtuple("TrainingResult", "model df trainer")
-TrainingInfo = collections.namedtuple("TrainingInfo", "iter train_loss test_loss")
+
 TRAIN_MAX_ITERS = "max_iters"
 TRAIN_OVERFITTING = "overfitting"
 TRAIN_STOP = "stop"
 
+DEFAULT_MAX_ITERS = 30_000
+DEFAULT_OVERFITTING_WINDOW = 400
+
+
+class TrainingInfo(collections.namedtuple("TrainingInfo", "iter train_loss validate_loss")):
+    def __str__(self):
+        return " ".join(f"{field}={getattr(self, field)}" for field in self._fields)
+
 
 def train_model(
-    param_type: str, df: pd.DataFrame, label: str, species: List[str] = None, create_plots=True, max_iters=30000
+    param_type: str,
+    df: pd.DataFrame,
+    label: str,
+    species: List[str] = None,
+    create_plots=True,
+    max_iters=DEFAULT_MAX_ITERS,
 ) -> TrainingResult:
     dtype = torch.float64
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    species = species or list(df[keys.ATOM_1_ELEMENT].unique())
+    species = species or (
+        set(df[keys.ATOM_1_ELEMENT].unique()) | set(df[keys.ATOM_2_ELEMENT].unique())
+    )
 
     # Create the model
+    scaler = models.Rescaler.from_data(df[keys.PARAM_OUT])
     if param_type == "V":
-        model = models.VModel(species)
-    if param_type == "U":
-        model = models.UModel(species)
+        model = models.VModel(species, rescaler=scaler)
+    elif param_type == "U":
+        model = models.UModel(species, rescaler=scaler)
     else:
         raise ValueError(f"Parameter type must be 'U' or 'V', got {param_type}")
 
     model.to(dtype=dtype, device=device)
 
-    return _do_train(model, param_type, df, create_plots=create_plots, label=label, max_iters=max_iters)
+    return _do_train(
+        model,
+        param_type,
+        df,
+        create_plots=create_plots,
+        label=label,
+        min_iters=5000,
+        max_iters=max_iters,
+    )
 
 
 def train(
@@ -49,17 +73,18 @@ def train(
     loss_fn,
     input_train,
     output_train,
-    input_test,
-    output_test,
+    input_validate,
+    output_validate,
+    min_iters=None,
     max_iters=None,
-    overfitting_window: Optional[int] = 10,
+    overfitting_window: Optional[int] = DEFAULT_OVERFITTING_WINDOW,
     callback: Callable[[TrainingInfo], Optional[str]] = None,
     callback_period=10,
 ) -> str:
     iter_range = utils._count() if max_iters is None else range(max_iters)
 
     # Track the losses
-    test_losses = []
+    validate_loss = []
 
     increased_last_n = 0
 
@@ -72,21 +97,26 @@ def train(
 
         opt.step()  # Does the update
 
-        # Keep track of the test loss
+        # Keep track of the validate loss
         with torch.no_grad():
-            test_losses.append(loss_fn(model(input_test), output_test).cpu().item())
+            validate_loss.append(loss_fn(model(input_validate), output_validate).cpu().item())
 
-        # Check if the test loss increased
-        if len(test_losses) > 1 and test_losses[-1] > test_losses[-2]:
+        # Check if the validate loss increased
+        if len(validate_loss) > 1 and validate_loss[-1] > validate_loss[-2]:
             increased_last_n += 1
         else:
             increased_last_n = 0
 
-        if overfitting_window is not None and increased_last_n >= overfitting_window:
+        if (
+            overfitting_window is not None
+            and (min_iters is None or len(validate_loss) > min_iters)
+            and increased_last_n >= (0.5 * overfitting_window)
+            and validate_loss[-1] > loss.cpu().item()
+        ):
             return TRAIN_OVERFITTING
 
         if callback is not None and (iter % callback_period == 0):
-            res = callback(TrainingInfo(iter, loss.cpu().item(), test_losses[-1]))
+            res = callback(TrainingInfo(iter, loss.cpu().item(), validate_loss[-1]))
             if res == TRAIN_STOP:
                 return res
 
@@ -106,25 +136,31 @@ class Trainer(mincepy.SavableObject):
         opt: torch.optim.Optimizer,
         loss_fn: Callable,
         frame: pd.DataFrame,
-        overfitting_window=10,
+        overfitting_window=DEFAULT_OVERFITTING_WINDOW,
         target_column: str = keys.PARAM_OUT,
     ) -> "Trainer":
         """This helper will construct a Trainer object by using data from a pandas DataFrame.
 
-        The test/training data will be extracted using the labels found in the keys.Training_LABEL column.
+        The validation/training data will be extracted using the labels found in the keys.Training_LABEL column.
         """
-        # Get views on our train and test data
+        # Get views on our train and validate data
         df_train = frame[frame[keys.TRAINING_LABEL] == keys.TRAIN]
-        df_test = frame[frame[keys.TRAINING_LABEL] == keys.TEST]
+        df_validate = frame[frame[keys.TRAINING_LABEL] == keys.VALIDATE]
 
         dtype = model.dtype
         device = model.device
 
         input_train = models.create_model_inputs(model.graph, df_train, dtype=dtype, device=device)
-        input_test = models.create_model_inputs(model.graph, df_test, dtype=dtype, device=device)
+        input_validate = models.create_model_inputs(
+            model.graph, df_validate, dtype=dtype, device=device
+        )
 
-        output_train = torch.tensor(df_train[target_column].to_numpy(), dtype=dtype, device=device).reshape(-1, 1)
-        output_test = torch.tensor(df_test[target_column].to_numpy(), dtype=dtype, device=device).reshape(-1, 1)
+        output_train = torch.tensor(
+            df_train[target_column].to_numpy(), dtype=dtype, device=device
+        ).reshape(-1, 1)
+        output_validate = torch.tensor(
+            df_validate[target_column].to_numpy(), dtype=dtype, device=device
+        ).reshape(-1, 1)
 
         return Trainer(
             model,
@@ -132,8 +168,8 @@ class Trainer(mincepy.SavableObject):
             loss_fn,
             input_train=input_train,
             output_train=output_train,
-            input_test=input_test,
-            output_test=output_test,
+            input_validate=input_validate,
+            output_validate=output_validate,
             overfitting_window=overfitting_window,
         )
 
@@ -144,9 +180,9 @@ class Trainer(mincepy.SavableObject):
         loss_fn: Callable,
         input_train,
         output_train,
-        input_test,
-        output_test,
-        overfitting_window=10,
+        input_validate,
+        output_validate,
+        overfitting_window=DEFAULT_OVERFITTING_WINDOW,
     ):
         super().__init__()
         self._model = model
@@ -156,8 +192,8 @@ class Trainer(mincepy.SavableObject):
         self._input_train = input_train
         self._output_train = output_train
 
-        self._input_test = input_test
-        self._output_test = output_test
+        self._input_validate = input_validate
+        self._output_validate = output_validate
 
         self.overfitting_window = overfitting_window
 
@@ -173,13 +209,15 @@ class Trainer(mincepy.SavableObject):
         return self._input_train
 
     @property
-    def input_test(self):
-        return self._input_test
+    def input_validate(self):
+        return self._input_validate
 
     def get_progress_frame(self) -> pd.DataFrame:
         return pd.DataFrame(data=self._training_progress)
 
-    def train(self, max_iters=10000, callback=None, callback_period=10) -> str:
+    def train(
+        self, min_iters=None, max_iters=DEFAULT_MAX_ITERS, callback=None, callback_period=10
+    ) -> str:
         start_iter = 0 if not self._training_progress else self._training_progress[-1].iter + 1
 
         def callback_fn(info: TrainingInfo):
@@ -197,8 +235,9 @@ class Trainer(mincepy.SavableObject):
             self._loss_fn,
             self._input_train,
             self._output_train,
-            self._input_test,
-            self._output_test,
+            self._input_validate,
+            self._output_validate,
+            min_iters=min_iters,
             max_iters=max_iters,
             overfitting_window=self.overfitting_window,
             callback=callback_fn,
@@ -206,7 +245,9 @@ class Trainer(mincepy.SavableObject):
         )
 
     def plot_training_curves(self, logscale=True):
-        training_run = pd.DataFrame(self._training_progress, columns=[keys.ITER, keys.TRAIN_LOSS, keys.TEST_LOSS])
+        training_run = pd.DataFrame(
+            self._training_progress, columns=[keys.ITER, keys.TRAIN_LOSS, keys.VALIDATE_LOSS]
+        )
         return plots.plot_training_curves(training_run, logscale=logscale)
 
     def _train_callback(self, info: TrainingInfo):
@@ -216,8 +257,8 @@ class Trainer(mincepy.SavableObject):
         self._model.to(device=device)
         self._input_train = _to(self._input_train, device)
         self._output_train = _to(self._output_train, device)
-        self._input_test = _to(self._input_test, device)
-        self._output_test = _to(self._output_test, device)
+        self._input_validate = _to(self._input_validate, device)
+        self._output_validate = _to(self._output_validate, device)
 
 
 def _to(obj, device):
@@ -232,7 +273,15 @@ def _to(obj, device):
         raise TypeError(obj)
 
 
-def _do_train(model, param_type, df, create_plots: bool, label: str, max_iters=20000):
+def _do_train(
+    model: e3psi.Model,
+    param_type,
+    df: pd.DataFrame,
+    create_plots: bool,
+    label: str,
+    min_iters=None,
+    max_iters=DEFAULT_MAX_ITERS,
+):
     if param_type not in ("U", "V"):
         raise ValueError(param_type)
 
@@ -242,37 +291,39 @@ def _do_train(model, param_type, df, create_plots: bool, label: str, max_iters=2
         opt=torch.optim.Adam(model.parameters(), lr=0.001),
         loss_fn=torch.nn.MSELoss(),
         frame=df,
-        overfitting_window=1000,
+        overfitting_window=DEFAULT_OVERFITTING_WINDOW,
     )
 
     # Train the model
-    trainer.train(callback=print, callback_period=50, max_iters=max_iters)
+    trainer.train(callback=print, callback_period=50, min_iters=min_iters, max_iters=max_iters)
 
     # Set the predicted values in the dataframe
-    predicted = model(trainer.input_test).detach().cpu().numpy().reshape(-1)
+    predicted = model(trainer.input_validate).detach().cpu().numpy().reshape(-1)
     predicted_train = model(trainer.input_train).detach().cpu().numpy().reshape(-1)
 
-    # Get the indices of the training and test data
+    # Get the indices of the training and validation data
     train_idx = df[df[keys.TRAINING_LABEL] == keys.TRAIN].index
-    test_idx = df[df[keys.TRAINING_LABEL] == keys.TEST].index
+    validate_idx = df[df[keys.TRAINING_LABEL] == keys.VALIDATE].index
 
-    df.loc[test_idx, keys.PARAM_OUT_PREDICTED] = predicted
+    df.loc[validate_idx, keys.PARAM_OUT_PREDICTED] = predicted
     df.loc[train_idx, keys.PARAM_OUT_PREDICTED] = predicted_train
 
     if create_plots:
         fig = trainer.plot_training_curves()
         fig.savefig(_plotfile_name(label, f"+{param_type}_training"), bbox_inches="tight")
 
-        test = df.loc[test_idx]
-        test_rmse = utils.rmse(test[keys.PARAM_OUT], test[keys.PARAM_OUT_PREDICTED])
-        fig = plots.create_parity_plot(df, title=f"RMSE = {test_rmse:.3f} eV", axis_label=f"${param_type}$ value (eV)")
+        validate = df.loc[validate_idx]
+        validate_rmse = utils.rmse(validate[keys.PARAM_OUT], validate[keys.PARAM_OUT_PREDICTED])
+        fig = plots.create_parity_plot(
+            df, title=f"RMSE = {validate_rmse:.3f} eV", axis_label=f"${param_type}$ value (eV)"
+        )
         fig.savefig(_plotfile_name(label, f"+{param_type}_parity_training"), bbox_inches="tight")
 
         fig = plots.split_plot(
-            df[df[keys.TRAINING_LABEL] == keys.TEST],
+            df[df[keys.TRAINING_LABEL] == keys.VALIDATE],
             keys.ATOM_1_ELEMENT,
             axis_label=f"${param_type}$ value (eV)",
-            title=f"Test data, RMSE = {test_rmse:.2f} eV",
+            title=f"Validate data, RMSE = {validate_rmse:.2f} eV",
         )
         fig.savefig(_plotfile_name(label, f"+{param_type}_parity_species"), bbox_inches="tight")
 

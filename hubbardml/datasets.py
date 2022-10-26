@@ -16,7 +16,10 @@ from . import utils
 HUBBARD_CUTOFF = 0.25
 
 
-def split(dataset: pd.DataFrame, frac=0.2, method="simple", **kwargs) -> pd.DataFrame:
+def split(dataset: pd.DataFrame, frac=0.2, method="simple", copy=False, **kwargs) -> pd.DataFrame:
+    if copy:
+        dataset = dataset.copy()
+
     if method == "simple":
         return split_simple(dataset, frac)
     elif method == "category":
@@ -29,21 +32,23 @@ def split_simple(dataset: pd.DataFrame, frac=0.2) -> pd.DataFrame:
     """Randomise a dataset by treating each row as independent"""
 
     dataset[keys.TRAINING_LABEL] = keys.TRAIN
-    dataset.loc[dataset.sample(frac=frac).index, keys.TRAINING_LABEL] = keys.TEST
+    dataset.loc[dataset.sample(frac=frac).index, keys.VALIDATE_LABEL] = keys.VALIDATE
 
     return dataset
 
 
-def split_within_category(dataset: pd.DataFrame, frac=0.2, category: Union[str, List] = None) -> pd.DataFrame:
+def split_within_category(
+    dataset: pd.DataFrame, frac=0.2, category: Union[str, List] = None
+) -> pd.DataFrame:
     """Randomise a fraction within each category"""
     dataset[keys.TRAINING_LABEL] = keys.TRAIN
 
-    def set_test(frame):
-        dataset.loc[frame.sample(frac=frac).index, keys.TRAINING_LABEL] = keys.TEST
+    def set_validate(frame):
+        dataset.loc[frame.sample(frac=frac).index, keys.TRAINING_LABEL] = keys.VALIDATE
 
     # For test we only use
     subset = dataset[dataset[keys.PARAM_OUT] > HUBBARD_CUTOFF]
-    subset.groupby(category).apply(set_test)
+    subset.groupby(category).apply(set_validate)
 
     return dataset
 
@@ -65,32 +70,19 @@ def preprocess(df: pd.DataFrame) -> pd.DataFrame:
             raise ValueError(f"Occupations matrices didn't all pass symmetry test {occup_label}")
 
     # Now calculate permutationally invariant features
-    df[keys.ATOM_1_OCCS_INV_1] = df.apply(lambda row: row[keys.ATOM_1_OCCS_1] + row[keys.ATOM_1_OCCS_2], axis=1)
+    df[keys.ATOM_1_OCCS_INV_1] = df.apply(
+        lambda row: row[keys.ATOM_1_OCCS_1] + row[keys.ATOM_1_OCCS_2], axis=1
+    )
     df[keys.ATOM_1_OCCS_INV_2] = df.apply(
         lambda row: np.multiply(row[keys.ATOM_1_OCCS_1], row[keys.ATOM_1_OCCS_2]), axis=1
     )
 
-    df[keys.ATOM_2_OCCS_INV_1] = df.apply(lambda row: row[keys.ATOM_2_OCCS_1] + row[keys.ATOM_2_OCCS_2], axis=1)
+    df[keys.ATOM_2_OCCS_INV_1] = df.apply(
+        lambda row: row[keys.ATOM_2_OCCS_1] + row[keys.ATOM_2_OCCS_2], axis=1
+    )
     df[keys.ATOM_2_OCCS_INV_2] = df.apply(
         lambda row: np.multiply(row[keys.ATOM_2_OCCS_1], row[keys.ATOM_2_OCCS_2]), axis=1
     )
-
-    mask = df.apply(lambda row: row[keys.ATOM_2_IDX] > row[keys.N_ATOM_UC], axis=1)
-    df.drop(df[mask].index)
-
-    # for directory in df[keys.DIR].unique():
-    #     new_rows = df[
-    #         (df[keys.PARAM_TYPE] == keys.PARAM_V) &\
-    #         (df[keys.DIR] == directory) &\
-    #         (df[keys.UV_ITER] == 2)
-    #     ].copy()
-    #     new_rows[keys.PARAM_OUT] = new_rows[keys.PARAM_IN]
-    #     new_rows[keys.PARAM_IN] = 0.
-    #     uvals = df[
-    #         (df[keys.PARAM_TYPE] == keys.PARAM_U) &\
-    #         (df[keys.DIR] == directory) &\
-    #         (df[keys.UV_ITER] == 2)
-    #     ]
 
     # Strip any whitespace from elements
     for key in (keys.ATOM_1_ELEMENT, keys.ATOM_2_ELEMENT):
@@ -132,7 +124,7 @@ def filter_dataset(
     return df
 
 
-def generate_converged_prediction_dataset(df: pd.DataFrame):
+def generate_converged_prediction_dataset(df: pd.DataFrame, zero_param_in=True):
     """This function takes a dataset, groups them by directory and sets the PARAM_OUT to the value of from the final
     iteration in that folder.  This is useful when training a model that should predict the final converged Hubbard
     parameter (rather than that of the next step in the self-consistent procedure)"""
@@ -151,7 +143,9 @@ def generate_converged_prediction_dataset(df: pd.DataFrame):
             atom_2_mask = df[keys.ATOM_2_IDX] == row[keys.ATOM_2_IDX]
 
             # Set all iterations to have the output parameter of the final iteration (hopefully converged)
-            new.loc[path_mask & atom_1_mask & atom_2_mask, keys.PARAM_OUT_FINAL] = row[keys.PARAM_OUT]
+            new.loc[path_mask & atom_1_mask & atom_2_mask, keys.PARAM_OUT_FINAL] = row[
+                keys.PARAM_OUT
+            ]
 
     return new
 
@@ -160,16 +154,20 @@ def symm_test(mtx):
     return (mtx == mtx.T).all()
 
 
-def load(filename: Union[pathlib.Path, str]) -> pd.DataFrame:
+def load(filename: Union[pathlib.Path, str], param_cutoff=None) -> pd.DataFrame:
     with open(filename) as file:
         json_data = json.load(file)
 
     df = pd.DataFrame(json_data)
+    if param_cutoff is not None:
+        # Only keep output parameters that are above the cutoff
+        df = df.drop(df[df[keys.PARAM_OUT] < param_cutoff].index)
+
     return preprocess(df)
 
 
-def rmse(df: pd.DataFrame, label: str = keys.TEST) -> float:
-    if label in (keys.TEST, keys.TRAIN):
+def rmse(df: pd.DataFrame, label: str = keys.VALIDATE) -> float:
+    if label in (keys.VALIDATE, keys.TRAIN):
         df = df[df[keys.TRAINING_LABEL] == label]
     elif label != "both":
         raise ValueError(label)
@@ -203,7 +201,9 @@ def element_pair(row) -> Tuple:
     """From a dataframe row or dictionary get the atom element pair sorted by highest atomic number first"""
     return tuple(
         sorted(
-            [row[keys.ATOM_1_ELEMENT], row[keys.ATOM_2_ELEMENT]], key=lambda x: ase.data.atomic_numbers[x], reverse=True
+            [row[keys.ATOM_1_ELEMENT], row[keys.ATOM_2_ELEMENT]],
+            key=lambda x: ase.data.atomic_numbers[x],
+            reverse=True,
         )
     )
 

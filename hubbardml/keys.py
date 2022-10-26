@@ -56,6 +56,7 @@ IRREPS_MEAN_2 = "irreps_mean_2"  # The occupation matrix in irrep form for atom 
 TRAINING_LABEL = "training_label"
 TRAIN = "train"
 TEST = "test"
+VALIDATE = "validate"
 
 ATOM_SPECIES_1_HOT = "atom_sepcies_1_tensor"
 ATOM_SPECIES_2_HOT = "atom_sepcies_2_tensor"
@@ -66,5 +67,6 @@ COLOUR = "colour"
 
 ITER = "iter"
 TRAIN_LOSS = "train_loss"
+VALIDATE_LOSS = "validate_loss"
 TEST_LOSS = "test_loss"
 LABEL = "label"
