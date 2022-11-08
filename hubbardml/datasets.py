@@ -1,6 +1,6 @@
 import json
 import pathlib
-from typing import List, Union, Tuple, Set
+from typing import List, Union, Tuple, Set, Iterator
 
 import ase.data
 import numpy as np
@@ -32,7 +32,7 @@ def split_simple(dataset: pd.DataFrame, frac=0.2) -> pd.DataFrame:
     """Randomise a dataset by treating each row as independent"""
 
     dataset[keys.TRAINING_LABEL] = keys.TRAIN
-    dataset.loc[dataset.sample(frac=frac).index, keys.VALIDATE_LABEL] = keys.VALIDATE
+    dataset.loc[dataset.sample(frac=frac).index, keys.TRAINING_LABEL] = keys.VALIDATE
 
     return dataset
 
@@ -124,30 +124,42 @@ def filter_dataset(
     return df
 
 
-def generate_converged_prediction_dataset(df: pd.DataFrame, zero_param_in=True):
-    """This function takes a dataset, groups them by directory and sets the PARAM_OUT to the value of from the final
+def generate_converged_prediction_dataset(df: pd.DataFrame, copy=True) -> pd.DataFrame:
+    """This function takes a dataset, groups them by directory and sets the PARAM_OUT to the value from the final
     iteration in that folder.  This is useful when training a model that should predict the final converged Hubbard
-    parameter (rather than that of the next step in the self-consistent procedure)"""
-    paths = get_self_consistent_paths(df)
-    new = df.copy(deep=True)
+    parameter (rather than that of the next step in the self-consistent procedure)
 
-    for path in paths:
-        path_mask = df[keys.DIR].str.startswith(path)
-        # Get the maximum iteration reached in that path
-        max_iter = df[path_mask][keys.UV_ITER].max()
+    The final iteration Hubbard parameter will be saved in the column `keys.PARAM_OUT_FINAL`
+    """
+    if copy:
+        out_df = df.copy(deep=True)
+    else:
+        out_df = df
 
-        row_mask = path_mask & (df[keys.UV_ITER] == max_iter)
-        for _, row in df[row_mask].iterrows():
-            # Find the path and atom indices that match
-            atom_1_mask = df[keys.ATOM_1_IDX] == row[keys.ATOM_1_IDX]
-            atom_2_mask = df[keys.ATOM_2_IDX] == row[keys.ATOM_2_IDX]
+    # Parameter type
+    for param_type in df[keys.PARAM_TYPE].unique():
+        param_rows = df[df[keys.PARAM_TYPE] == param_type]
+        # Self consistent paths
+        for path, sc_rows in iter_self_consistent_paths(param_rows):
+            # Atom index pairs
+            for pair, rows in iter_atom_idx_pairs(sc_rows):
+                # Get the maximum iteration reached
+                max_iter = rows[keys.UV_ITER].max()
+                final_iter = rows[rows[keys.UV_ITER] == max_iter]
+                if len(final_iter) != 1:
+                    print(
+                        f"WARNING: Expected only one iteration for {path}: {pair}, got {len(final_iter)}"
+                    )
+                    final_iter = final_iter[
+                        final_iter[keys.HP_TIME_UNIX] == final_iter[keys.HP_TIME_UNIX].max()
+                    ]
 
-            # Set all iterations to have the output parameter of the final iteration (hopefully converged)
-            new.loc[path_mask & atom_1_mask & atom_2_mask, keys.PARAM_OUT_FINAL] = row[
-                keys.PARAM_OUT
-            ]
+                # Save the final Hubbard parameter value to the keys.PARAM_OUT_FILE column
+                out_df.loc[out_df.index.isin(rows.index), keys.PARAM_OUT_FINAL] = float(
+                    final_iter[keys.PARAM_OUT]
+                )
 
-    return new
+    return out_df
 
 
 def symm_test(mtx):
@@ -210,4 +222,28 @@ def element_pair(row) -> Tuple:
 
 def get_self_consistent_paths(df: pd.DataFrame) -> Set[pathlib.Path]:
     """Returns a set of paths that are the root of the self-consistent Hubbard calculations"""
-    return {str(pathlib.Path(directory).parent) for directory in df[keys.DIR].unique()}
+    return {str(pathlib.Path(directory).parent) + "/" for directory in df[keys.DIR].unique()}
+
+
+def iter_self_consistent_paths(df: pd.DataFrame) -> Iterator[pd.DataFrame]:
+    """Iterate over slices of the passed dataframe belonging to a set of self-consistent iterations
+
+    This will yield (path, dataframe) tuples.
+    """
+    for path in get_self_consistent_paths(df):
+        sc_rows = df[df[keys.DIR].str.startswith(path)]
+        yield path, sc_rows
+
+
+def iter_atom_idx_pairs(df: pd.DataFrame) -> Iterator[pd.DataFrame]:
+    """Iterate over slices of the passed dataframe belonging to a pair of atom indices.
+
+    This will yield (pair, dataframe) tuples.
+    """
+    # Get unique atom index pairs
+    pairs = df.apply(lambda row: (row[keys.ATOM_1_IDX], row[keys.ATOM_2_IDX]), axis=1)
+    unique_pairs = pairs.unique()
+
+    for pair in unique_pairs:
+        pair_rows = df[df.index.isin(pairs[pairs == pair].index)]
+        yield pair, pair_rows

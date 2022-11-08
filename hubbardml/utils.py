@@ -31,3 +31,8 @@ def calculate_v_energy(hubbard_v: float, occupations: np.ndarray) -> float:
 
 def calculate_hubbard_energy(hubbard_u: float, hubbard_v: float, occupations: np.ndarray) -> float:
     return calculate_u_energy(hubbard_u, occupations) + calculate_v_energy(hubbard_v, occupations)
+
+
+def to_mev_string(energy: float) -> str:
+    """Return an energy in meV showing units e.g. '234 meV'"""
+    return f"{energy * 1000:.0f} meV"

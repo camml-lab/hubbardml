@@ -1,7 +1,7 @@
 import collections
 import math
 import uuid
-from typing import Dict, Tuple, Iterable
+from typing import Dict, Tuple, Iterable, Union
 
 from e3nn import o3
 import e3psi
@@ -65,7 +65,7 @@ class UModel(e3psi.models.OnsiteModel):
         self,
         species: Iterable[str],
         nn_irreps_out="23x0e + 4x2e + 1x3e + 4x4e + 1x5e + 2x6e + 1x8e",
-        hidden_layers=1,
+        hidden_layers=2,
         **kwargs,
     ) -> None:
         graph = UGraph(species)
@@ -351,15 +351,15 @@ class Rescaler(e3psi.models.Module):
         return (data - self.shift) / self.scale
 
     @classmethod
-    def from_data(cls, dataset, method="mean") -> "Rescaler":
+    def from_data(cls, dataset: Union[np.ndarray, torch.Tensor], method="mean") -> "Rescaler":
         if method == "mean":
-            shift = np.mean(dataset)
-            scale = np.std(dataset)
+            shift = dataset.mean()
+            scale = dataset.std()
             return Rescaler(shift, scale)
         elif method == "minmax":
-            dmin = np.min(dataset)
+            dmin = dataset.min()
             shift = dmin
-            scale = np.max(dataset) - dmin
+            scale = dataset.max() - dmin
             return Rescaler(shift, scale)
         else:
             raise ValueError(f"Unknown method: {method}")

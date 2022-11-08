@@ -48,7 +48,7 @@ class Project:
         loss_fn=torch.nn.MSELoss(),
         path: Union[str, pathlib.Path] = None,
         param_cutoff=DEFAULT_PARAM_CUTOFF,
-        predict_final=False,
+        target_column=keys.PARAM_OUT,
         rescale="mean",
         hidden_layers=None,
     ) -> "Project":
@@ -66,7 +66,7 @@ class Project:
         :return:
         """
         if path is None:
-            path = cls.create_path(model_type, predict_final)
+            path = cls.create_path(model_type)
         else:
             path = pathlib.Path(path).absolute()
 
@@ -74,20 +74,17 @@ class Project:
             raise ValueError(f"Path already exists: {path}")
 
         # Prepare the dataset
-        if not isinstance(dataset, pd.DataFrame):
+        if isinstance(dataset, pd.DataFrame):
+            dataset = dataset.copy()
+        else:
+            # Assume we can load it because we have a path
             dataset = datasets.load(dataset)
 
-        if predict_final:
-            dataset = datasets.generate_final()
-            target_param = keys.PARAM_OUT_FINAL
-        else:
-            target_param = keys.PARAM_OUT
-
         if param_cutoff is not None:
-            dataset = dataset[dataset[target_param] > param_cutoff]
+            dataset = dataset[dataset[target_column] > param_cutoff]
 
         if rescale is not None:
-            rescaler = models.Rescaler.from_data(dataset[keys.PARAM_OUT], method=rescale)
+            rescaler = models.Rescaler.from_data(dataset[target_column], method=rescale)
         else:
             rescaler = None
 
@@ -113,7 +110,7 @@ class Project:
             opt=optimiser(model.parameters(), lr=optimiser_learning_rate),
             loss_fn=loss_fn,
             frame=dataset,
-            target_column=target_param,
+            target_column=target_column,
         )
 
         # Create the directory and save everything

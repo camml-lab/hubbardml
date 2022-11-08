@@ -8,12 +8,13 @@ import pandas as pd
 
 from . import datasets
 from . import keys
+from . import utils
 
 plot_colours = [
-    "#222222",
+    "#131313",
     "#BF016B",
-    "#999999",
-    # '#FFFFFF',
+    "#CBCCC6",
+    "#58A4B0",
 ]
 
 colourmap = matplotlib.colors.ListedColormap(plot_colours, name="pinkblack")
@@ -36,6 +37,8 @@ element_colours = {
     "Ti": "#BFC2C7",
 }
 
+DEFAULT_ALPHA = 0.6
+
 
 def _minmax(df, *keys):
     minval = min(df[key].min() for key in keys)
@@ -44,7 +47,7 @@ def _minmax(df, *keys):
     return minval, maxval
 
 
-def plot_series(ax, xdat, ydat, color, label):
+def plot_series(ax, xdat, ydat, color, label, size=50):
     ax.plot(
         xdat,
         ydat,
@@ -61,12 +64,21 @@ def plot_series(ax, xdat, ydat, color, label):
         label=label,
         c=color,
         marker=matplotlib.markers.MarkerStyle("o", fillstyle="none"),
-        s=50,
+        s=size,
         zorder=2,
     )
 
 
 def create_parity_plot(df, axis_label=None, title=None) -> plt.Figure:
+    """
+    Create parity plot from validation and training label
+
+    :param df: the dataframe
+    :param axis_label: xy axis label
+    :param title: plot title
+    :return: the matplotlib figure object
+    """
+
     validate = df[df[keys.TRAINING_LABEL] == keys.VALIDATE]
     train = df[df[keys.TRAINING_LABEL] == keys.TRAIN]
 
@@ -79,27 +91,28 @@ def create_parity_plot(df, axis_label=None, title=None) -> plt.Figure:
 
     plt.xlim(ranges)
     plt.ylim(ranges)
-    plt.plot(ranges, ranges, c=plot_colours[1])
+    plt.plot(ranges, ranges, c="black", zorder=3)
     if axis_label:
         plt.xlabel(f"{axis_label} training")
         plt.ylabel(f"{axis_label} prediction")
 
-    # plt.scatter
-
     plt.scatter(
         train[keys.PARAM_OUT],
         train[keys.PARAM_OUT_PREDICTED],
-        label="Training",
+        label=f"Training {utils.to_mev_string(datasets.rmse(train, keys.TRAIN))}",
         s=5,
         c=train[keys.COLOUR],
+        alpha=DEFAULT_ALPHA,
+        zorder=2,
     )
     plt.scatter(
         validate[keys.PARAM_OUT],
         validate[keys.PARAM_OUT_PREDICTED],
-        label="Validate",
+        label=f"Validation {utils.to_mev_string(datasets.rmse(validate, keys.VALIDATE))}",
         s=42,
         alpha=0.5,
         c=validate[keys.COLOUR],
+        zorder=2,
     )
     plt.legend()
 
@@ -117,9 +130,6 @@ def create_progression_plots(df, yrange: float = None, num_cols=3, max_plots=Non
     if max_plots is not None:
         total = min(total, max_plots)
     num_rows = math.ceil(total / num_cols)
-    # fig = plt.figure(figsize=(6 * scale * num_cols, 4 * scale * num_rows))
-    # gs = fig.add_gridspec(num_rows, num_cols)
-    # axs = gs.subplots(sharex="col")
 
     fig, axs = plt.subplots(
         nrows=num_rows,
@@ -144,18 +154,14 @@ def create_progression_plots(df, yrange: float = None, num_cols=3, max_plots=Non
     for path in paths:
         sc_frame = df[df[keys.DIR].str.startswith(path)]
 
-        # Get atom index pairs
-        pairs = sc_frame.apply(lambda row: (row[keys.ATOM_1_IDX], row[keys.ATOM_2_IDX]), axis=1)
-        unique_pairs = pairs.unique()
-
-        for pair in unique_pairs:
-            ax = axs[axis_no]
-            pair_rows = sc_frame[sc_frame.index.isin(pairs[pairs == pair].index)]
+        # Iterate over atom index pairs
+        for pair, pair_rows in datasets.iter_atom_idx_pairs(sc_frame):
             sorted_df = pair_rows.sort_values(by=[keys.UV_ITER])
             iters = sorted_df[keys.UV_ITER]
             row = sorted_df.iloc[0]
 
             # Set up the axes
+            ax = axs[axis_no]
             ax.set_title(
                 "".join(map(str, [row[keys.ATOM_1_IN_NAME], row[keys.ATOM_2_IN_NAME]])),
                 y=0.8,
@@ -204,7 +210,7 @@ def split_plot(df, category_key, axis_label=None, title=None):
     minval, maxval = _minmax(df, keys.PARAM_OUT, keys.PARAM_OUT_PREDICTED)
     ranges = (minval - 0.1 * np.abs(minval), maxval + 0.1 * np.abs(maxval))
 
-    plt.plot(ranges, ranges, c=plot_colours[1])
+    plt.plot(ranges, ranges, c="black", zorder=3)
     for category in categories:
         # For the validate set extract the rows for this specie
         subset = df[df[category_key] == category]
@@ -213,7 +219,13 @@ def split_plot(df, category_key, axis_label=None, title=None):
         predicted = subset[keys.PARAM_OUT_PREDICTED]
 
         rmse = np.linalg.norm(vals - predicted) / np.sqrt(len(vals))
-        plt.scatter(vals, predicted, label=f"{category} {rmse:.3f} eV", c=subset[keys.COLOUR])
+        plt.scatter(
+            vals,
+            predicted,
+            label=f"{category} {utils.to_mev_string(rmse)}",
+            c=subset[keys.COLOUR],
+            alpha=DEFAULT_ALPHA,
+        )
 
     if axis_label:
         plt.xlabel(f"{axis_label} target")
@@ -230,27 +242,45 @@ def split_plot(df, category_key, axis_label=None, title=None):
 def plot_training_curves(training_run: pd.DataFrame, logscale=True) -> plt.Figure:
     fig = plt.figure(figsize=(6, 3))
     fig.suptitle("Training curves")
+    ax = fig.gca()
 
     plt.ylabel("Loss")
     plt.xlabel("Iteration")
 
     plt.cla()
-    plt.scatter(
+    # plt.scatter(
+    #     training_run[keys.ITER],
+    #     training_run[keys.TRAIN_LOSS],
+    #     s=5,
+    #     label="Train",
+    #     c=train_validate_colours[keys.TRAIN],
+    #     alpha=0.8,
+    # )
+    plot_series(
+        ax,
         training_run[keys.ITER],
         training_run[keys.TRAIN_LOSS],
-        s=5,
         label="Train",
-        c=train_validate_colours[keys.TRAIN],
-        alpha=0.8,
+        color=train_validate_colours[keys.TRAIN],
+        size=5,
+        # alpha=0.8,
     )
     if keys.VALIDATE_LOSS in training_run:
-        plt.scatter(
+        # plt.scatter(
+        #     training_run[keys.ITER],
+        #     training_run[keys.VALIDATE_LOSS],
+        #     s=5,
+        #     label="Validate",
+        #     c=train_validate_colours[keys.VALIDATE],
+        #     alpha=0.8,
+        # )
+        plot_series(
+            ax,
             training_run[keys.ITER],
             training_run[keys.VALIDATE_LOSS],
-            s=5,
             label="Validate",
-            c=train_validate_colours[keys.VALIDATE],
-            alpha=0.8,
+            color=train_validate_colours[keys.VALIDATE],
+            size=5,
         )
     plt.legend()
     ax = plt.gca()

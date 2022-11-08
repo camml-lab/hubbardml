@@ -43,6 +43,8 @@ ATOM_1_IDX_UC = "atom_1_idx_uc"
 ATOM_2_IDX = "atom_2_idx"
 ATOM_2_IDX_UC = "atom_2_idx_uc"
 
+HP_TIME_UNIX = "hp_time_unix"
+
 # Calculated properties
 ATOM_1_OCCS_INV_1 = "atom_1_occs_inv_1"
 ATOM_1_OCCS_INV_2 = "atom_1_occs_inv_2"
