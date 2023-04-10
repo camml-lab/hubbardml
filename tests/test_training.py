@@ -16,10 +16,15 @@ def test_trainer_save_load(historian: mincepy.Historian, dataframe):  # noqa: F8
 
     species = set(dataframe[hubbardml.keys.ATOM_1_ELEMENT])
 
-    model = hubbardml.models.VModel(species)
+    model = hubbardml.models.VModel(hubbardml.models.VGraph(species))
     opt = (torch.optim.Adam(model.parameters(), lr=0.001),)
     loss_fn = (torch.nn.MSELoss(),)
 
     testing.do_round_trip(
-        historian, training.Trainer.from_frame, model=model, opt=opt, loss_fn=loss_fn, frame=dataframe
+        historian,
+        training.Trainer.from_frame,
+        model=model,
+        opt=opt,
+        loss_fn=loss_fn,
+        frame=dataframe,
     )

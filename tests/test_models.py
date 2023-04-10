@@ -9,14 +9,16 @@ SPECIES = ("H", "C", "N", "F")
 
 
 def test_umodel_load_save(historian: mincepy.Historian):  # noqa: F811
-    reference = models.UModel(SPECIES)
-    loaded = testing.do_round_trip(historian, models.VModel, SPECIES)
+    graph = models.UGraph(SPECIES)
+    reference = models.UModel(graph)
+    loaded = testing.do_round_trip(historian, models.UModel, graph)
 
     assert reference.species == loaded.species
 
 
 def test_vmodel_load_save(historian: mincepy.Historian):  # noqa: F811
-    reference = models.VModel(SPECIES)
-    loaded = testing.do_round_trip(historian, models.VModel, SPECIES)
+    graph = models.VGraph(SPECIES)
+    reference = models.VModel(graph)
+    loaded = testing.do_round_trip(historian, models.VModel, graph)
 
     assert reference.species == loaded.species
