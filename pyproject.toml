@@ -32,6 +32,7 @@ dependencies = [
     "mincepy[sci]",
     "numpy",
     "pandas",
+    "polars",
     "torch",
 ]
 [project.optional-dependencies]

@@ -1,10 +1,12 @@
 import collections
+import copy
 import uuid
 from typing import List, Optional, Callable
 
 import mincepy
 
 import e3psi
+import numpy as np
 import pandas as pd
 import torch
 
@@ -199,6 +201,13 @@ class Trainer(mincepy.SavableObject):
 
         # Track the losses
         self._training_progress = []
+        self._best_state = copy.deepcopy(model.state_dict())
+
+    @property
+    def best_model(self):
+        model = copy.deepcopy(self.model)
+        model.load_state_dict(self._best_state)
+        return model
 
     @property
     def progress(self) -> List[TrainingInfo]:
@@ -251,6 +260,12 @@ class Trainer(mincepy.SavableObject):
         return plots.plot_training_curves(training_run, logscale=logscale)
 
     def _train_callback(self, info: TrainingInfo):
+        if self._training_progress:
+            min_validation_loss = np.min([entry.validate_loss for entry in self._training_progress])
+            if info.validate_loss < min_validation_loss:
+                # Save the best model state so that we can reuse it later
+                self._best_state = copy.deepcopy(self._model.state_dict())
+
         self._training_progress.append(info)
 
     def to(self, device):

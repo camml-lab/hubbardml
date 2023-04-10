@@ -285,6 +285,7 @@ def plot_training_curves(training_run: pd.DataFrame, logscale=True) -> plt.Figur
     plt.legend()
     ax = plt.gca()
     if logscale:
+        ax.set_xscale("log")
         ax.set_yscale("log")
 
     return fig

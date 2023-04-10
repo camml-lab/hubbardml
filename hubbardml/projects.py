@@ -1,6 +1,6 @@
 import datetime
 import pathlib
-from typing import Union
+from typing import Union, Final
 
 import pandas as pd
 import torch
@@ -40,7 +40,7 @@ class Project:
     def new(
         cls,
         dataset: Union[str, pathlib.Path, pd.DataFrame],
-        model_type: str,
+        model_type: Final[str],
         split_dataset=True,
         training_split=0.2,
         optimiser=torch.optim.Adam,
@@ -89,12 +89,14 @@ class Project:
             rescaler = None
 
         # Create the classes we need
-        model_class = models.MODELS[model_type]
-        dataset = model_class.prepare_dataset(dataset)
+        graph_class = models.GRAPHS[model_type]
+        dataset = graph_class.prepare_dataset(dataset)
         species = list(
             pd.concat((dataset[keys.ATOM_1_ELEMENT], dataset[keys.ATOM_2_ELEMENT])).unique()
         )
+
         # Create the model
+        model_class = models.MODELS[model_type]
         models_kwargs = dict(species=species, irrep_normalization="component", rescaler=rescaler)
         if hidden_layers is not None:
             models_kwargs["hidden_layers"] = hidden_layers
@@ -142,7 +144,7 @@ class Project:
 
     @property
     def model(self):
-        return self.trainer.model
+        return self.trainer.best_model
 
     @property
     def trainer(self) -> training.Trainer:

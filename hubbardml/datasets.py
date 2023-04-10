@@ -1,6 +1,6 @@
 import json
 import pathlib
-from typing import List, Union, Tuple, Set, Iterator
+from typing import List, Union, Tuple, Set, Iterator, Mapping
 
 import ase.data
 import numpy as np
@@ -99,7 +99,8 @@ def filter_dataset(
     remove_zero_out=True,
     remove_in_eq_out=True,
     param_type=None,
-):
+) -> pd.DataFrame:
+    """Remove certain entries from the dataset"""
     if not isinstance(df, pd.DataFrame):
         raise TypeError(df)
 
@@ -139,7 +140,7 @@ def generate_converged_prediction_dataset(df: pd.DataFrame, copy=True) -> pd.Dat
     # Parameter type
     for param_type in df[keys.PARAM_TYPE].unique():
         param_rows = df[df[keys.PARAM_TYPE] == param_type]
-        # Self consistent paths
+        # Self-consistent paths
         for path, sc_rows in iter_self_consistent_paths(param_rows):
             # Atom index pairs
             for pair, rows in iter_atom_idx_pairs(sc_rows):
@@ -162,7 +163,7 @@ def generate_converged_prediction_dataset(df: pd.DataFrame, copy=True) -> pd.Dat
     return out_df
 
 
-def symm_test(mtx):
+def symm_test(mtx) -> bool:
     return (mtx == mtx.T).all()
 
 
@@ -218,6 +219,11 @@ def element_pair(row) -> Tuple:
             reverse=True,
         )
     )
+
+
+def get_occupation_matrices(row: Mapping, atom_idx: int) -> List:
+    """Get the occupation matrices for an atom number for teh given row"""
+    return [row[f"atom_{atom_idx}_occs_1"], row[f"atom_{atom_idx}_occs_2"]]
 
 
 def get_self_consistent_paths(df: pd.DataFrame) -> Set[pathlib.Path]:
