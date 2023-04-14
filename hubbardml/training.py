@@ -253,10 +253,27 @@ class Trainer(mincepy.SavableObject):
         return self._data_logger
 
     def status(self) -> str:
+        # Deal with case where metrics are None because we haven't started
+        train_mse = (
+            f"{self.training.metrics.get(MSE):.5f}"
+            if self.training.metrics.get(MSE) is not None
+            else None
+        )
+        valid_mse = (
+            f"{self.validation.metrics.get(MSE):.5f}"
+            if self.validation.metrics.get(MSE) is not None
+            else None
+        )
+        valid_rmse = (
+            f"{self.validation.metrics.get(MSE):.4f}"
+            if self.validation.metrics.get(RMSE) is not None
+            else None
+        )
+
         return (
             f"epoch: {self.epoch} "
-            f"train: mse {self.training.metrics.get(MSE):.5f}, "
-            f"valid: mse {self.validation.metrics.get(MSE):.5f} rmse {self.validation.metrics.get(RMSE):.4f}"
+            f"train: mse {train_mse}, "
+            f"valid: mse {valid_mse} rmse {valid_rmse}"
         )
 
     def __str__(self) -> str:

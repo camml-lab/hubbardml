@@ -186,8 +186,12 @@ class Project:
         )
 
     def infer(self) -> pd.DataFrame:
-        predicted = self.model(self.trainer.validation_data).detach().cpu().numpy().reshape(-1)
-        predicted_train = self.model(self.trainer.training_data).detach().cpu().numpy().reshape(-1)
+        predicted = (
+            self.model(self.trainer.validation_data.all_inputs()).detach().cpu().numpy().reshape(-1)
+        )
+        predicted_train = (
+            self.model(self.trainer.training_data.all_inputs()).detach().cpu().numpy().reshape(-1)
+        )
 
         df = self.dataset
         # Get the indices of the training and validate data

@@ -3,9 +3,8 @@ import torch.optim
 from mincepy import testing
 from mincepy.testing import historian, archive_uri, mongodb_archive
 
-import hubbardml.models
+import hubbardml
 from hubbardml import keys
-from hubbardml import training
 
 SPECIES = ("C", "H", "F")
 
@@ -16,13 +15,13 @@ def test_trainer_save_load(historian: mincepy.Historian, dataframe):  # noqa: F8
 
     species = set(dataframe[hubbardml.keys.ATOM_1_ELEMENT])
 
-    model = hubbardml.models.VModel(hubbardml.models.VGraph(species))
+    model = hubbardml.VModel(hubbardml.VGraph(species))
     opt = (torch.optim.Adam(model.parameters(), lr=0.001),)
     loss_fn = (torch.nn.MSELoss(),)
 
     testing.do_round_trip(
         historian,
-        training.Trainer.from_frame,
+        hubbardml.Trainer.from_frame,
         model=model,
         opt=opt,
         loss_fn=loss_fn,
