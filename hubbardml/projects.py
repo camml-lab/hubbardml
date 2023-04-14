@@ -5,7 +5,7 @@ from typing import Union, Final
 import pandas as pd
 import torch
 
-import e3psi.models
+from . import graphs
 from . import datasets
 from . import keys
 from . import models
@@ -89,7 +89,7 @@ class Project:
             rescaler = None
 
         # Create the classes we need
-        graph_class = models.GRAPHS[model_type]
+        graph_class = graphs.GRAPHS[model_type]
         dataset = graph_class.prepare_dataset(dataset)
         species = list(
             pd.concat((dataset[keys.ATOM_1_ELEMENT], dataset[keys.ATOM_2_ELEMENT])).unique()
@@ -97,14 +97,14 @@ class Project:
 
         # Create the model
         model_class = models.MODELS[model_type]
-        models_kwargs = dict(species=species, irrep_normalization="component", rescaler=rescaler)
+        models_kwargs = dict(irrep_normalization="component", rescaler=rescaler)
         if hidden_layers is not None:
             models_kwargs["hidden_layers"] = hidden_layers
-        model = model_class(**models_kwargs)
+        model = model_class(graph_class(species), **models_kwargs)
 
         if split_dataset:
             dataset = datasets.split(
-                dataset, method="category", frac=training_split, category=[models.SPECIES]
+                dataset, method="category", frac=training_split, category=[keys.SPECIES]
             )
 
         trainer = training.Trainer.from_frame(
@@ -172,8 +172,8 @@ class Project:
 
     def train(
         self,
-        min_iters=5_000,
-        max_iters=training.DEFAULT_MAX_ITERS,
+        min_epochs=5_000,
+        max_epochs=training.DEFAULT_MAX_EPOCHS,
         print_output=True,
         overfitting_window=None,
     ) -> str:
@@ -182,12 +182,12 @@ class Project:
             self.trainer.overfitting_window = overfitting_window
 
         return self.trainer.train(
-            min_iters=min_iters, max_iters=max_iters, callback=callback, callback_period=50
+            min_epochs=min_epochs, max_epochs=max_epochs, callback=callback, callback_period=50
         )
 
     def infer(self) -> pd.DataFrame:
-        predicted = self.model(self.trainer.input_validate).detach().cpu().numpy().reshape(-1)
-        predicted_train = self.model(self.trainer.input_train).detach().cpu().numpy().reshape(-1)
+        predicted = self.model(self.trainer.validation_data).detach().cpu().numpy().reshape(-1)
+        predicted_train = self.model(self.trainer.training_data).detach().cpu().numpy().reshape(-1)
 
         df = self.dataset
         # Get the indices of the training and validate data

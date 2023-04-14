@@ -258,7 +258,7 @@ def plot_training_curves(training_run: pd.DataFrame, logscale=True) -> plt.Figur
     # )
     plot_series(
         ax,
-        training_run[keys.ITER],
+        training_run[keys.EPOCH],
         training_run[keys.TRAIN_LOSS],
         label="Train",
         color=train_validate_colours[keys.TRAIN],
@@ -276,7 +276,7 @@ def plot_training_curves(training_run: pd.DataFrame, logscale=True) -> plt.Figur
         # )
         plot_series(
             ax,
-            training_run[keys.ITER],
+            training_run[keys.EPOCH],
             training_run[keys.VALIDATE_LOSS],
             label="Validate",
             color=train_validate_colours[keys.VALIDATE],

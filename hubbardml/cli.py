@@ -52,7 +52,7 @@ def train(project_path, max_iters, dev, overfit):
             click.echo(f"Switching to {dev}")
             project.to(dev)
 
-        res = project.train(max_iters=max_iters, overfitting_window=overfit)
+        res = project.train(max_epochs=max_iters, overfitting_window=overfit)
         click.echo(f"Stop condition: {str(res)}")
     except Exception as exc:
         click.echo(str(exc))

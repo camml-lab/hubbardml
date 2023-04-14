@@ -1,35 +1,34 @@
+import abc
 import collections
+import contextlib
 import copy
+import itertools
+from typing import List, Callable, Any
 import uuid
-from typing import List, Optional, Callable
-
-import mincepy
 
 import e3psi
-import numpy as np
+import mincepy
 import pandas as pd
 import torch
+import torch.utils.data
 
 from . import keys
+from . import engines
+from . import graphs
 from . import models
 from . import plots
 from . import utils
 
-__all__ = "TrainingResult", "TrainingInfo", "Trainer", "train_model"
+__all__ = "TrainingResult", "Trainer", "train_model"
 
 TrainingResult = collections.namedtuple("TrainingResult", "model df trainer")
 
-TRAIN_MAX_ITERS = "max_iters"
+TRAIN_MAX_EPOCHS = "max_epochs"
 TRAIN_OVERFITTING = "overfitting"
 TRAIN_STOP = "stop"
 
-DEFAULT_MAX_ITERS = 30_000
+DEFAULT_MAX_EPOCHS = 30_000
 DEFAULT_OVERFITTING_WINDOW = 400
-
-
-class TrainingInfo(collections.namedtuple("TrainingInfo", "iter train_loss validate_loss")):
-    def __str__(self):
-        return " ".join(f"{field}={getattr(self, field)}" for field in self._fields)
 
 
 def train_model(
@@ -38,7 +37,7 @@ def train_model(
     label: str,
     species: List[str] = None,
     create_plots=True,
-    max_iters=DEFAULT_MAX_ITERS,
+    max_epochs=DEFAULT_MAX_EPOCHS,
 ) -> TrainingResult:
     dtype = torch.float64
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -50,9 +49,9 @@ def train_model(
     # Create the model
     scaler = models.Rescaler.from_data(df[keys.PARAM_OUT])
     if param_type == "V":
-        model = models.VModel(species, rescaler=scaler)
+        model = models.VModel(graphs.VGraph(species), rescaler=scaler)
     elif param_type == "U":
-        model = models.UModel(species, rescaler=scaler)
+        model = models.UModel(graphs.UGraph(species), rescaler=scaler)
     else:
         raise ValueError(f"Parameter type must be 'U' or 'V', got {param_type}")
 
@@ -65,65 +64,84 @@ def train_model(
         create_plots=create_plots,
         label=label,
         min_iters=5000,
-        max_iters=max_iters,
+        max_epochs=max_epochs,
     )
 
 
-def train(
-    model: e3psi.Model,
-    opt: torch.optim.Optimizer,
-    loss_fn,
-    input_train,
-    output_train,
-    input_validate,
-    output_validate,
-    min_iters=None,
-    max_iters=None,
-    overfitting_window: Optional[int] = DEFAULT_OVERFITTING_WINDOW,
-    callback: Callable[[TrainingInfo], Optional[str]] = None,
-    callback_period=10,
-) -> str:
-    iter_range = utils._count() if max_iters is None else range(max_iters)
+class TrainerListener:
+    def epoch_started(self, trainer: "Trainer", epoch_num):
+        """Called when an epoch starts"""
 
-    # Track the losses
-    validate_loss = []
+    def epoch_ended(self, trainer: "Trainer", epoch_num):
+        """Called when an epoch ends"""
 
-    increased_last_n = 0
 
-    for iter in iter_range:
-        opt.zero_grad()  # zero the gradient buffers
+class DataLogger(TrainerListener):
+    def __init__(self):
+        super().__init__()
+        self._data_log = []
 
-        output = model(input_train)
-        loss = loss_fn(output, output_train)
-        loss.backward()
+    def epoch_started(self, trainer: "Trainer", epoch_num):
+        self._data_log.append({"epoch": epoch_num})
 
-        opt.step()  # Does the update
+    def log(self, name: str, value):
+        self._data_log[-1][name] = value
 
-        # Keep track of the validate loss
-        with torch.no_grad():
-            validate_loss.append(loss_fn(model(input_validate), output_validate).cpu().item())
+    def as_dataframe(self) -> pd.DataFrame:
+        return pd.DataFrame(self._data_log)
 
-        # Check if the validate loss increased
-        if len(validate_loss) > 1 and validate_loss[-1] > validate_loss[-2]:
-            increased_last_n += 1
-        else:
-            increased_last_n = 0
 
-        if (
-            overfitting_window is not None
-            and (min_iters is None or len(validate_loss) > min_iters)
-            and increased_last_n >= (0.5 * overfitting_window)
-            and validate_loss[-1] > loss.cpu().item()
-        ):
-            return TRAIN_OVERFITTING
+class EarlyStopping(TrainerListener):
+    def __init__(self, patience: int, metric="loss"):
+        self.patience = patience
+        self._metric = metric
+        self._num_increases = 0
+        self._last_value = None
 
-        if callback is not None and (iter % callback_period == 0):
-            res = callback(TrainingInfo(iter, loss.cpu().item(), validate_loss[-1]))
-            if res == TRAIN_STOP:
-                return res
+    def epoch_ended(self, trainer: "Trainer", epoch_num):
+        new_value = trainer.validation.metrics[self._metric]
+        if self._last_value is not None:
+            if new_value > self._last_value:
+                self._num_increases += 1
+            else:
+                # Reset
+                self._num_increases = 0
 
-    # Reached the maximum number of iterations
-    return TRAIN_MAX_ITERS
+        self._last_value = new_value
+        if self._num_increases > self.patience:
+            trainer.stop(TRAIN_OVERFITTING)
+
+
+class CallbackListener(TrainerListener):
+    def __init__(self, callback_fn: Callable, callback_period=1):
+        self._callback_fn = callback_fn
+        self._callback_period = callback_period
+
+    def epoch_ended(self, trainer: "Trainer", epoch_num):
+        if epoch_num % self._callback_period == 0:
+            self._callback_fn(trainer)
+
+
+class ModelCheckpointer(TrainerListener):
+    def __init__(self, score_function: Callable):
+        super().__init__()
+        self._score_function = score_function
+        self._best_model = None
+        self._lowest_score = None
+
+    @property
+    def best_model(self):
+        return self._best_model
+
+    def epoch_ended(self, trainer: "Trainer", epoch_num):
+        current_score = self._score_function(trainer)
+        if self._lowest_score is None or current_score < self._lowest_score:
+            self._lowest_score = current_score
+            self._best_model = copy.deepcopy(trainer.model.state_dict())
+
+
+MSE = "mse"
+RMSE = "rmse"
 
 
 class Trainer(mincepy.SavableObject):
@@ -149,29 +167,19 @@ class Trainer(mincepy.SavableObject):
         df_train = frame[frame[keys.TRAINING_LABEL] == keys.TRAIN]
         df_validate = frame[frame[keys.TRAINING_LABEL] == keys.VALIDATE]
 
-        dtype = model.dtype
-        device = model.device
-
-        input_train = models.create_model_inputs(model.graph, df_train, dtype=dtype, device=device)
-        input_validate = models.create_model_inputs(
-            model.graph, df_validate, dtype=dtype, device=device
-        )
-
-        output_train = torch.tensor(
-            df_train[target_column].to_numpy(), dtype=dtype, device=device
-        ).reshape(-1, 1)
-        output_validate = torch.tensor(
-            df_validate[target_column].to_numpy(), dtype=dtype, device=device
-        ).reshape(-1, 1)
-
         return Trainer(
             model,
             opt,
             loss_fn,
-            input_train=input_train,
-            output_train=output_train,
-            input_validate=input_validate,
-            output_validate=output_validate,
+            train_data=graphs.HubbardDataset(
+                model.graph,
+                df_train,
+                dtype=torch.get_default_dtype(),
+                device=model.device,
+            ),
+            validate_data=graphs.HubbardDataset(
+                model.graph, df_validate, dtype=torch.get_default_dtype(), device=model.device
+            ),
             overfitting_window=overfitting_window,
         )
 
@@ -180,10 +188,8 @@ class Trainer(mincepy.SavableObject):
         model: e3psi.Model,
         opt: torch.optim.Optimizer,
         loss_fn: Callable,
-        input_train,
-        output_train,
-        input_validate,
-        output_validate,
+        train_data: graphs.HubbardDataset,
+        validate_data: graphs.HubbardDataset,
         overfitting_window=DEFAULT_OVERFITTING_WINDOW,
     ):
         super().__init__()
@@ -191,101 +197,144 @@ class Trainer(mincepy.SavableObject):
         self._opt = opt
         self._loss_fn = loss_fn
 
-        self._input_train = input_train
-        self._output_train = output_train
+        self._train_data = train_data
+        self._validate_data = validate_data
 
-        self._input_validate = input_validate
-        self._output_validate = output_validate
+        # Training and validation data loaders
+        self._train_loader = torch.utils.data.DataLoader(train_data, batch_size=4096)
+        self._validate_loader = torch.utils.data.DataLoader(validate_data, batch_size=4096)
 
+        self._events = engines.EventGenerator()
         self.overfitting_window = overfitting_window
+        self._stopping = False
+        self._stop_msg = None
 
-        # Track the losses
-        self._training_progress = []
-        self._best_state = copy.deepcopy(model.state_dict())
+        # Track all the losses
+        self._epoch = 0
+
+        self.training = engines.Engine(self._model)
+        self.training.add_engine_listener(engines.Mae("mse"))
+
+        self.validation = engines.Engine(self._model)
+        self.validation.add_engine_listener(engines.Mae("mse"))
+        self.validation.add_engine_listener(engines.Rmse("rmse"))
+
+        # Save checkpoints using the MSE
+        self._checkpointer = ModelCheckpointer(score_function=self._checkpoint_score)
+        self.add_trainer_listener(self._checkpointer)
+
+        self._data_logger = DataLogger()
+        self.add_trainer_listener(self._data_logger)
+
+    @staticmethod
+    def _checkpoint_score(trainer):
+        return trainer.validation.metrics["mse"]
 
     @property
     def best_model(self):
         model = copy.deepcopy(self.model)
-        model.load_state_dict(self._best_state)
+        model.load_state_dict(self._checkpointer.best_model)
         return model
 
     @property
-    def progress(self) -> List[TrainingInfo]:
-        return self._training_progress
+    def training_data(self) -> graphs.HubbardDataset:
+        return self._train_data
 
     @property
-    def input_train(self):
-        return self._input_train
+    def validation_data(self) -> graphs.HubbardDataset:
+        return self._validate_data
 
     @property
-    def input_validate(self):
-        return self._input_validate
+    def epoch(self):
+        return self._epoch
 
-    def get_progress_frame(self) -> pd.DataFrame:
-        return pd.DataFrame(data=self._training_progress)
+    @property
+    def data_logger(self) -> DataLogger:
+        return self._data_logger
+
+    def status(self) -> str:
+        return (
+            f"epoch: {self.epoch} "
+            f"train: mse {self.training.metrics.get(MSE):.5f}, "
+            f"valid: mse {self.validation.metrics.get(MSE):.5f} rmse {self.validation.metrics.get(RMSE):.4f}"
+        )
+
+    def __str__(self) -> str:
+        return self.status()
 
     def train(
-        self, min_iters=None, max_iters=DEFAULT_MAX_ITERS, callback=None, callback_period=10
+        self,
+        min_epochs=None,
+        max_epochs=DEFAULT_MAX_EPOCHS,
+        callback: Callable = None,
+        callback_period=10,
     ) -> str:
-        start_iter = 0 if not self._training_progress else self._training_progress[-1].iter + 1
+        self._stopping = False
+        iterator = itertools.count() if max_epochs == -1 else range(max_epochs)
 
-        def callback_fn(info: TrainingInfo):
-            new_info = info._asdict()
-            new_info[keys.ITER] = start_iter + info.iter
-            info = TrainingInfo(**new_info)
-            self._train_callback(info)
+        listeners = []
+        if self.overfitting_window:
+            listeners.append(EarlyStopping(self.overfitting_window, MSE))
+        if callback is not None:
+            listeners.append(CallbackListener(callback, callback_period=callback_period))
 
-            if callback is not None and info.iter % callback_period == 0:
-                return callback(info)
+        with self.listeners_context(listeners):
+            for _ in iterator:
+                self._events.fire_event(TrainerListener.epoch_started, self, self.epoch)
+                self._model.train()
 
-        return train(
-            self._model,
-            self._opt,
-            self._loss_fn,
-            self._input_train,
-            self._output_train,
-            self._input_validate,
-            self._output_validate,
-            min_iters=min_iters,
-            max_iters=max_iters,
-            overfitting_window=self.overfitting_window,
-            callback=callback_fn,
-            callback_period=1,
-        )
+                # Iterate over batches
+                self._opt.zero_grad()
+                for batch_idx, x, y, y_pred in self.training.step(self._train_loader):
+                    loss = self._loss_fn(y_pred, y)
+                    loss.backward()
+                    self._opt.step()
+                    self._opt.zero_grad()
+
+                # Now do validation run
+                self._model.eval()
+                self.validation.run(self._validate_loader)
+
+                self._data_logger.log(keys.TRAIN_LOSS, self.training.metrics[MSE])
+                self._data_logger.log(keys.VALIDATE_LOSS, self.validation.metrics[MSE])
+                self._data_logger.log("validate_rmse", self.validation.metrics[RMSE])
+
+                self._events.fire_event(TrainerListener.epoch_ended, self, self.epoch)
+
+                self._epoch += 1
+
+                if self._stopping:
+                    break
+
+        if self._stopping:
+            return self._stop_msg
+
+        return TRAIN_MAX_EPOCHS
 
     def plot_training_curves(self, logscale=True):
-        training_run = pd.DataFrame(
-            self._training_progress, columns=[keys.ITER, keys.TRAIN_LOSS, keys.VALIDATE_LOSS]
-        )
-        return plots.plot_training_curves(training_run, logscale=logscale)
-
-    def _train_callback(self, info: TrainingInfo):
-        if self._training_progress:
-            min_validation_loss = np.min([entry.validate_loss for entry in self._training_progress])
-            if info.validate_loss < min_validation_loss:
-                # Save the best model state so that we can reuse it later
-                self._best_state = copy.deepcopy(self._model.state_dict())
-
-        self._training_progress.append(info)
+        return plots.plot_training_curves(self._data_logger.as_dataframe(), logscale=logscale)
 
     def to(self, device):
         self._model.to(device=device)
-        self._input_train = _to(self._input_train, device)
-        self._output_train = _to(self._output_train, device)
-        self._input_validate = _to(self._input_validate, device)
-        self._output_validate = _to(self._output_validate, device)
 
+    def stop(self, msg: str):
+        self._stopping = True
+        self._stop_msg = msg
 
-def _to(obj, device):
-    if isinstance(obj, torch.Tensor):
-        return obj.to(device=device)
-    elif isinstance(obj, dict):
-        for key, value in obj.items():
-            obj[key] = _to(value, device)
+    @contextlib.contextmanager
+    def listeners_context(self, listeners: List[TrainerListener]):
+        handles = list(map(self.add_trainer_listener, listeners))
+        try:
+            yield
+        finally:
+            # Remove all the listeners
+            list(map(self.remove_trainer_listener, handles))
 
-        return obj
-    else:
-        raise TypeError(obj)
+    def add_trainer_listener(self, listener) -> Any:
+        return self._events.add_listener(listener)
+
+    def remove_trainer_listener(self, handle) -> Any:
+        return self._events.remove_listener(handle)
 
 
 def _do_train(
@@ -295,7 +344,7 @@ def _do_train(
     create_plots: bool,
     label: str,
     min_iters=None,
-    max_iters=DEFAULT_MAX_ITERS,
+    max_epochs=DEFAULT_MAX_EPOCHS,
 ):
     if param_type not in ("U", "V"):
         raise ValueError(param_type)
@@ -310,11 +359,11 @@ def _do_train(
     )
 
     # Train the model
-    trainer.train(callback=print, callback_period=50, min_iters=min_iters, max_iters=max_iters)
+    trainer.train(callback=print, callback_period=50, min_epochs=min_iters, max_epochs=max_epochs)
 
     # Set the predicted values in the dataframe
-    predicted = model(trainer.input_validate).detach().cpu().numpy().reshape(-1)
-    predicted_train = model(trainer.input_train).detach().cpu().numpy().reshape(-1)
+    predicted = model(trainer.validation_data.all_inputs()).detach().cpu().numpy().reshape(-1)
+    predicted_train = model(trainer.training_data.all_inputs()).detach().cpu().numpy().reshape(-1)
 
     # Get the indices of the training and validation data
     train_idx = df[df[keys.TRAINING_LABEL] == keys.TRAIN].index

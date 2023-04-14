@@ -67,7 +67,7 @@ PARAM_OUT_PREDICTED = "param_out_predicted"
 
 COLOUR = "colour"
 
-ITER = "iter"
+EPOCH = "epoch"
 TRAIN_LOSS = "train_loss"
 VALIDATE_LOSS = "validate_loss"
 TEST_LOSS = "test_loss"
@@ -75,3 +75,5 @@ LABEL = "label"
 
 # Self-consistent paths
 SC_PATHS = "sc_paths"
+
+SPECIES = "species"
