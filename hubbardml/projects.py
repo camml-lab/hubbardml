@@ -5,6 +5,7 @@ from typing import Union, Final
 import pandas as pd
 import torch
 
+from . import engines
 from . import graphs
 from . import datasets
 from . import keys
@@ -186,11 +187,20 @@ class Project:
         )
 
     def infer(self) -> pd.DataFrame:
-        predicted = (
-            self.model(self.trainer.validation_data.all_inputs()).detach().cpu().numpy().reshape(-1)
+        val_predictions = (
+            engines.evaluate(self.model, self.trainer.validate_loader)
+            .detach()
+            .cpu()
+            .numpy()
+            .reshape(-1)
         )
-        predicted_train = (
-            self.model(self.trainer.training_data.all_inputs()).detach().cpu().numpy().reshape(-1)
+
+        train_predictions = (
+            engines.evaluate(self.model, self.trainer.train_loader)
+            .detach()
+            .cpu()
+            .numpy()
+            .reshape(-1)
         )
 
         df = self.dataset
@@ -198,8 +208,8 @@ class Project:
         train_idx = df[df[keys.TRAINING_LABEL] == keys.TRAIN].index
         validate_idx = df[df[keys.TRAINING_LABEL] == keys.VALIDATE].index
 
-        df.loc[validate_idx, keys.PARAM_OUT_PREDICTED] = predicted
-        df.loc[train_idx, keys.PARAM_OUT_PREDICTED] = predicted_train
+        df.loc[validate_idx, keys.PARAM_OUT_PREDICTED] = val_predictions
+        df.loc[train_idx, keys.PARAM_OUT_PREDICTED] = train_predictions
 
         return df
 

@@ -29,6 +29,7 @@ TRAIN_STOP = "stop"
 
 DEFAULT_MAX_EPOCHS = 30_000
 DEFAULT_OVERFITTING_WINDOW = 400
+DEFAULT_BATCH_SIZE = 4096
 
 
 def train_model(
@@ -156,6 +157,7 @@ class Trainer(mincepy.SavableObject):
         opt: torch.optim.Optimizer,
         loss_fn: Callable,
         frame: pd.DataFrame,
+        batch_size=DEFAULT_BATCH_SIZE,
         overfitting_window=DEFAULT_OVERFITTING_WINDOW,
         target_column: str = keys.PARAM_OUT,
     ) -> "Trainer":
@@ -167,19 +169,28 @@ class Trainer(mincepy.SavableObject):
         df_train = frame[frame[keys.TRAINING_LABEL] == keys.TRAIN]
         df_validate = frame[frame[keys.TRAINING_LABEL] == keys.VALIDATE]
 
+        train_data = graphs.HubbardDataset(
+            model.graph,
+            df_train,
+            target_column=target_column,
+            dtype=torch.get_default_dtype(),
+            device=model.device,
+        )
+
+        validate_data = graphs.HubbardDataset(
+            model.graph,
+            df_validate,
+            target_column=target_column,
+            dtype=torch.get_default_dtype(),
+            device=model.device,
+        )
+
         return Trainer(
             model,
             opt,
             loss_fn,
-            train_data=graphs.HubbardDataset(
-                model.graph,
-                df_train,
-                dtype=torch.get_default_dtype(),
-                device=model.device,
-            ),
-            validate_data=graphs.HubbardDataset(
-                model.graph, df_validate, dtype=torch.get_default_dtype(), device=model.device
-            ),
+            train_data=torch.utils.data.DataLoader(train_data, batch_size=batch_size),
+            validate_data=torch.utils.data.DataLoader(validate_data, batch_size=batch_size),
             overfitting_window=overfitting_window,
         )
 
@@ -188,8 +199,8 @@ class Trainer(mincepy.SavableObject):
         model: e3psi.Model,
         opt: torch.optim.Optimizer,
         loss_fn: Callable,
-        train_data: graphs.HubbardDataset,
-        validate_data: graphs.HubbardDataset,
+        train_data: torch.utils.data.DataLoader,
+        validate_data: torch.utils.data.DataLoader,
         overfitting_window=DEFAULT_OVERFITTING_WINDOW,
     ):
         super().__init__()
@@ -201,8 +212,8 @@ class Trainer(mincepy.SavableObject):
         self._validate_data = validate_data
 
         # Training and validation data loaders
-        self._train_loader = torch.utils.data.DataLoader(train_data, batch_size=4096)
-        self._validate_loader = torch.utils.data.DataLoader(validate_data, batch_size=4096)
+        self._train_loader = train_data
+        self._validate_loader = validate_data
 
         self._events = engines.EventGenerator()
         self.overfitting_window = overfitting_window
@@ -237,11 +248,11 @@ class Trainer(mincepy.SavableObject):
         return model
 
     @property
-    def training_data(self) -> graphs.HubbardDataset:
+    def train_loader(self) -> torch.utils.data.DataLoader:
         return self._train_data
 
     @property
-    def validation_data(self) -> graphs.HubbardDataset:
+    def validate_loader(self) -> torch.utils.data.DataLoader:
         return self._validate_data
 
     @property
@@ -265,7 +276,7 @@ class Trainer(mincepy.SavableObject):
             else None
         )
         valid_rmse = (
-            f"{self.validation.metrics.get(MSE):.4f}"
+            f"{self.validation.metrics.get(RMSE):.4f}"
             if self.validation.metrics.get(RMSE) is not None
             else None
         )
@@ -296,8 +307,10 @@ class Trainer(mincepy.SavableObject):
             listeners.append(CallbackListener(callback, callback_period=callback_period))
 
         with self.listeners_context(listeners):
-            for _ in iterator:
-                self._events.fire_event(TrainerListener.epoch_started, self, self.epoch)
+            for local_epoch in iterator:
+                self._events.fire_event(
+                    TrainerListener.epoch_started, self, self.epoch
+                )  # EPOCH START
                 self._model.train()
 
                 # Iterate over batches
@@ -310,17 +323,18 @@ class Trainer(mincepy.SavableObject):
 
                 # Now do validation run
                 self._model.eval()
-                self.validation.run(self._validate_loader)
+                with torch.no_grad():
+                    self.validation.run(self._validate_loader)
 
                 self._data_logger.log(keys.TRAIN_LOSS, self.training.metrics[MSE])
                 self._data_logger.log(keys.VALIDATE_LOSS, self.validation.metrics[MSE])
                 self._data_logger.log("validate_rmse", self.validation.metrics[RMSE])
 
-                self._events.fire_event(TrainerListener.epoch_ended, self, self.epoch)
+                self._events.fire_event(TrainerListener.epoch_ended, self, self.epoch)  # EPOCH END
 
                 self._epoch += 1
 
-                if self._stopping:
+                if (min_epochs is not None and local_epoch > min_epochs) and self._stopping:
                     break
 
         if self._stopping:
@@ -379,15 +393,19 @@ def _do_train(
     trainer.train(callback=print, callback_period=50, min_epochs=min_iters, max_epochs=max_epochs)
 
     # Set the predicted values in the dataframe
-    predicted = model(trainer.validation_data.all_inputs()).detach().cpu().numpy().reshape(-1)
-    predicted_train = model(trainer.training_data.all_inputs()).detach().cpu().numpy().reshape(-1)
+    val_predictions = (
+        engines.evaluate(model, trainer.validate_loader).detach().cpu().numpy().reshape(-1)
+    )
+    train_predictions = (
+        engines.evaluate(model, trainer.train_loader).detach().cpu().numpy().reshape(-1)
+    )
 
     # Get the indices of the training and validation data
     train_idx = df[df[keys.TRAINING_LABEL] == keys.TRAIN].index
     validate_idx = df[df[keys.TRAINING_LABEL] == keys.VALIDATE].index
 
-    df.loc[validate_idx, keys.PARAM_OUT_PREDICTED] = predicted
-    df.loc[train_idx, keys.PARAM_OUT_PREDICTED] = predicted_train
+    df.loc[validate_idx, keys.PARAM_OUT_PREDICTED] = val_predictions
+    df.loc[train_idx, keys.PARAM_OUT_PREDICTED] = train_predictions
 
     if create_plots:
         fig = trainer.plot_training_curves()

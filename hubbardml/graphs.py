@@ -432,11 +432,13 @@ class HubbardDataset(torch.utils.data.Dataset):
         self,
         graph: ModelGraph,
         dataframe: pd.DataFrame,
+        target_column=keys.PARAM_OUT,
         dtype=None,
         device=None,
     ):
         self._graph = graph
         self._df = dataframe
+        self._target_column = target_column
         self._dtype = dtype or torch.get_default_dtype()
         self._device = device
         self._cache = {}
@@ -456,7 +458,7 @@ class HubbardDataset(torch.utils.data.Dataset):
 
         row = self._df.iloc[item]
         inp = self._graph.create_inputs(row, dtype=self._dtype, device=self._device)
-        label = torch.tensor([row[keys.PARAM_OUT]], dtype=self._dtype, device=self._device)
+        label = torch.tensor([row[self._target_column]], dtype=self._dtype, device=self._device)
         self._cache[item] = inp, label
 
         return inp, label
@@ -468,6 +470,9 @@ class HubbardDataset(torch.utils.data.Dataset):
 
     def all_inputs(self):
         return torch.utils.data.default_collate(list(map(operator.itemgetter(0), self)))
+
+    def all_outputs(self):
+        return torch.utils.data.default_collate(list(map(operator.itemgetter(1), self)))
 
 
 GRAPHS = {

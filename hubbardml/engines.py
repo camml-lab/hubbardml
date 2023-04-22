@@ -1,7 +1,7 @@
 import abc
 import collections
 import math
-from typing import Callable, Any, Union, Iterable, Generator
+from typing import Callable, Any, Union, Iterable, Generator, Optional
 import uuid
 
 import torch
@@ -107,6 +107,9 @@ class EventGenerator:
             getattr(listener, event_fn.__name__)(*args, **kwargs)
 
 
+EngineStep = collections.namedtuple("EngineStep", "batch_idx x y y_pred")
+
+
 class Engine:
     """Training engine"""
 
@@ -132,43 +135,26 @@ class Engine:
             self._events.fire_event(EngineListener.batch_starting, self, batch_idx, x, y)
 
             y_pred = self._model(x)
-            yield batch_idx, x, y, y_pred
+            yield EngineStep(batch_idx, x, y, y_pred)
 
             self._events.fire_event(EngineListener.batch_ended, self, batch_idx, x, y, y_pred)
             total_batch_size += len(x)
 
         self._events.fire_event(EngineListener.epoch_ended, self, total_batch_size)
 
-    def run(self, data: Iterable):
+    def run(self, data: Iterable, return_outputs=False) -> Optional[Any]:
+        if return_outputs:
+            return torch.utils.data.default_collate(list(step.y_pred for step in self.step(data)))[
+                0
+            ]
+
         collections.deque(self.step(data), maxlen=0)
-
-
-class OutputSaver(EngineListener):
-    def __init__(self):
-        super().__init__()
-        self._outputs = []
-
-    def get_outputs(self) -> torch.Tensor:
-        return torch.stack(self._outputs)
-
-    def epoch_starting(self, engine: "Engine"):
-        # Reset out outputs
-        self._outputs = []
-
-    def batch_ended(self, engine: "Engine", batch_idx, x, y, y_pred):
-        self._outputs.append(y_pred)
 
 
 def evaluate(model: torch.nn.Module, data: Iterable):
     """Evaluate the dataset and return all the model outputs"""
     model.eval()
-    engine = Engine(model)
-    saver = OutputSaver()
-    engine.add_engine_listener(saver)
-    with torch.no_grad():
-        engine.run(data)
-
-    return saver.get_outputs()
+    return Engine(model).run(data, return_outputs=True)
 
 
 def _to(obj, device):
