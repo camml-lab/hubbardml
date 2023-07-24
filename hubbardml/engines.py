@@ -144,9 +144,7 @@ class Engine:
 
     def run(self, data: Iterable, return_outputs=False) -> Optional[Any]:
         if return_outputs:
-            return torch.utils.data.default_collate(list(step.y_pred for step in self.step(data)))[
-                0
-            ]
+            return torch.concat(list(step.y_pred for step in self.step(data)))
 
         collections.deque(self.step(data), maxlen=0)
 

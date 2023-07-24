@@ -1,6 +1,6 @@
 import datetime
 import pathlib
-from typing import Union, Final
+from typing import Union
 
 import pandas as pd
 import torch
@@ -41,7 +41,7 @@ class Project:
     def new(
         cls,
         dataset: Union[str, pathlib.Path, pd.DataFrame],
-        model_type: Final[str],
+        model_type: str,
         split_dataset=True,
         training_split=0.2,
         optimiser=torch.optim.Adam,
@@ -60,7 +60,6 @@ class Project:
         :param split_dataset:
         :param training_split:
         :param optimiser:
-        :param optimiser_learning_rate:
         :param loss_fn:
         :param path:
         :param param_cutoff: drop all data where the param_out is less than this cutoff value
@@ -217,13 +216,10 @@ class Project:
         self.trainer.to(device)
 
     def save_training_plots(self, plot_path="plots/", label="", format="pdf"):
-        self = self
         if isinstance(self.model, models.UModel):
             param_type = "U"
         elif isinstance(self.model, models.VModel):
             param_type = "V"
-        elif isinstance(self.model, models.UVModel):
-            param_type = "UV"
         else:
             raise ValueError(f"Unknown model type: {self.model.__class__.__name__}")
 

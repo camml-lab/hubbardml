@@ -1,16 +1,22 @@
+import logging
 import random
 
 import numpy as np
+import numpy.random
 import torch
 
+_LOGGER = logging.getLogger(__name__)
 
-def rmse(y1, y2) -> float:
-    return np.sqrt(((y1 - y2) ** 2).mean())
+
+def rmse(y1, y2):
+    return ((y1 - y2) ** 2).mean() ** 0.5
 
 
 def random_seed(seed: int = 0xDEADBEEF):
+    _LOGGER.info("Setting random seed to %i", seed)
     random.seed(seed)
     torch.manual_seed(seed)
+    np.random.seed(seed)
 
 
 def _count():

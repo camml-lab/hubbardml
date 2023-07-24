@@ -1,5 +1,7 @@
+import functools
 import json
 import pathlib
+import random
 from typing import List, Union, Tuple, Set, Iterator, Mapping
 
 import ase.data
@@ -7,13 +9,8 @@ import numpy as np
 import pandas as pd
 
 from . import keys
+from . import similarities
 from . import utils
-
-# A cutoff below which Hubbard corrections are not applied, even if HP calculates the output Hubbard params for
-# all Hubbard-active species.  This is a threshold set by us and not in practice during self-consistent Hubbard
-# calculations where the Hubbard-active sites are typically set manually based on knowledge of the neighbour
-# environment
-HUBBARD_CUTOFF = 0.25
 
 
 def split(dataset: pd.DataFrame, frac=0.2, method="simple", copy=False, **kwargs) -> pd.DataFrame:
@@ -38,17 +35,85 @@ def split_simple(dataset: pd.DataFrame, frac=0.2) -> pd.DataFrame:
 
 
 def split_within_category(
-    dataset: pd.DataFrame, frac=0.2, category: Union[str, List] = None
+    dataset: pd.DataFrame,
+    frac=0.2,
+    category: Union[str, List] = None,
+    ignore_already_labelled=False,
 ) -> pd.DataFrame:
     """Randomise a fraction within each category"""
-    dataset[keys.TRAINING_LABEL] = keys.TRAIN
 
     def set_validate(frame):
         dataset.loc[frame.sample(frac=frac).index, keys.TRAINING_LABEL] = keys.VALIDATE
 
-    # For test we only use
-    subset = dataset[dataset[keys.PARAM_OUT] > HUBBARD_CUTOFF]
+    subset = dataset
+    if ignore_already_labelled:
+        # Ignore any previous labelling, and split the whole dataset
+        subset = dataset
+    elif keys.TRAINING_LABEL in dataset.columns:
+        # Only split those that haven't already been assigned already
+        subset = dataset[dataset[keys.TRAINING_LABEL].isnull()]
+
+    # Set to split first and then change to validate the ones we randomly choose
+    dataset.loc[subset.index, keys.TRAINING_LABEL] = keys.TRAIN
     subset.groupby(category).apply(set_validate)
+
+    return dataset
+
+
+def _split_by_cluster(
+    dataset: pd.DataFrame,
+    frac=0.2,
+) -> pd.DataFrame:
+    dataset[keys.TRAINING_LABEL] = keys.TRAIN
+    cluster_ids = dataset[similarities.CLUSTER_ID].unique()
+    validation_ids = random.sample(list(cluster_ids), int(round(frac * len(cluster_ids))))
+
+    # Label duplicates of validation rows as duplicates so that they don't skew the stats when calculating validation
+    # losses
+    dataset.loc[
+        dataset[similarities.CLUSTER_ID].isin(validation_ids), keys.TRAINING_LABEL
+    ] = keys.DUPLICATE
+    for cluster_id in validation_ids:
+        dataset.loc[
+            dataset[dataset[similarities.CLUSTER_ID] == cluster_id].first_valid_index(),
+            keys.TRAINING_LABEL,
+        ] = keys.VALIDATE
+
+    return dataset
+
+
+def split_by_cluster(
+    dataset: pd.DataFrame,
+    frac=0.2,
+    category: Union[str, List] = None,
+    ignore_already_labelled=False,
+) -> pd.DataFrame:
+    def _split_by_cluster(frame: pd.DataFrame):
+        cluster_ids = frame[similarities.CLUSTER_ID].unique()
+        validation_ids = random.sample(list(cluster_ids), int(round(frac * len(cluster_ids))))
+
+        # Label duplicates of validation rows as duplicates so that they don't skew the stats when calculating
+        # validation losses
+        dataset.loc[
+            dataset[similarities.CLUSTER_ID].isin(validation_ids), keys.TRAINING_LABEL
+        ] = keys.DUPLICATE
+        for cluster_id in validation_ids:
+            dataset.loc[
+                frame[frame[similarities.CLUSTER_ID] == cluster_id].first_valid_index(),
+                keys.TRAINING_LABEL,
+            ] = keys.VALIDATE
+
+    subset = dataset
+    if ignore_already_labelled:
+        # Ignore any previous labelling, and split the whole dataset
+        subset = dataset
+    elif keys.TRAINING_LABEL in dataset.columns:
+        # Only split those that haven't already been assigned already
+        subset = dataset[dataset[keys.TRAINING_LABEL].isnull()]
+
+    # Set to split first and then change to validate the ones we randomly choose
+    dataset.loc[subset.index, keys.TRAINING_LABEL] = keys.TRAIN
+    subset.groupby(category, group_keys=False).apply(_split_by_cluster)
 
     return dataset
 
@@ -68,21 +133,6 @@ def preprocess(df: pd.DataFrame) -> pd.DataFrame:
         # Check  that the occupation matrices are symmetric as expected
         if sum(df[occup_label].apply(symm_test) == False) != 0:  # noqa: E712
             raise ValueError(f"Occupations matrices didn't all pass symmetry test {occup_label}")
-
-    # Now calculate permutationally invariant features
-    df[keys.ATOM_1_OCCS_INV_1] = df.apply(
-        lambda row: row[keys.ATOM_1_OCCS_1] + row[keys.ATOM_1_OCCS_2], axis=1
-    )
-    df[keys.ATOM_1_OCCS_INV_2] = df.apply(
-        lambda row: np.multiply(row[keys.ATOM_1_OCCS_1], row[keys.ATOM_1_OCCS_2]), axis=1
-    )
-
-    df[keys.ATOM_2_OCCS_INV_1] = df.apply(
-        lambda row: row[keys.ATOM_2_OCCS_1] + row[keys.ATOM_2_OCCS_2], axis=1
-    )
-    df[keys.ATOM_2_OCCS_INV_2] = df.apply(
-        lambda row: np.multiply(row[keys.ATOM_2_OCCS_1], row[keys.ATOM_2_OCCS_2]), axis=1
-    )
 
     # Strip any whitespace from elements
     for key in (keys.ATOM_1_ELEMENT, keys.ATOM_2_ELEMENT):
@@ -179,11 +229,9 @@ def load(filename: Union[pathlib.Path, str], param_cutoff=None) -> pd.DataFrame:
     return preprocess(df)
 
 
-def rmse(df: pd.DataFrame, label: str = keys.VALIDATE) -> float:
-    if label in (keys.VALIDATE, keys.TRAIN):
-        df = df[df[keys.TRAINING_LABEL] == label]
-    elif label != "both":
-        raise ValueError(label)
+def rmse(df: pd.DataFrame, training_label: str = keys.VALIDATE) -> float:
+    if training_label is not None:
+        df = df[df[keys.TRAINING_LABEL] == training_label]
 
     return utils.rmse(df[keys.PARAM_OUT], df[keys.PARAM_OUT_PREDICTED])
 

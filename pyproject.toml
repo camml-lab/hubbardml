@@ -26,14 +26,16 @@ keywords = ["machine learning", "equivariant", "electronic structure"]
 requires-python = ">=3.7"
 dependencies = [
     "ase",
-    "e3nn",
+    "e3nn>=0.5.1",
     "e3psi",
+    "hydra-core",
     "matplotlib",
     "mincepy[sci]",
     "numpy",
     "pandas",
     "polars",
-    "torch",
+    "torch>=2.0",
+    "odfpy"  # So that we can save dataframes into ods format
 ]
 [project.optional-dependencies]
 dev = [
@@ -45,7 +47,7 @@ dev = [
 [project.scripts]
 hml = "hubbardml.cli:hml"
 [project.entry-points."mincepy.plugins.types"]
- "hubbardml" = "hubbardml.provides:get_mincepy_types"
+"hubbardml" = "hubbardml.provides:get_mincepy_types"
 
 [tool.black]
 line-length = 100

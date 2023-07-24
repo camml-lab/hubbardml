@@ -11,7 +11,7 @@ import torch
 
 from . import graphs
 
-__all__ = "UModel", "VModel", "UVModel"
+__all__ = "UModel", "VModel"
 
 
 class UModel(e3psi.models.OnsiteModel):
@@ -25,7 +25,7 @@ class UModel(e3psi.models.OnsiteModel):
     def __init__(
         self,
         graph: graphs.UGraph,
-        feature_irreps="23x0e + 4x2e + 1x3e + 4x4e + 1x5e + 2x6e + 1x8e",
+        feature_irreps="2x0e + 2x1e + 2x2e + 2x3e + 2x4e",
         hidden_layers=2,
         **kwargs,
     ) -> None:
@@ -69,41 +69,16 @@ class VModel(e3psi.IntersiteModel):
     def __init__(
         self,
         graph: graphs.VGraph,
-        node_features="10x0e+4x1e+6x2e",
+        feature_irreps="4x0e + 4x1e + 4x2e + 4x3e",
         **kwargs,
     ):
         super().__init__(
             graph,
-            node_features=node_features,
+            feature_irreps=feature_irreps,
             irreps_out="0e",
             **kwargs,
         )
         self._species = tuple(graph.species)
-
-    @property
-    def species(self) -> Tuple:
-        """Get the supported species"""
-        return self._species
-
-
-class UVModel(e3psi.IntersiteModel):
-    """Hubbard +U+V model"""
-
-    # Columns to store the current p-block and d-block elements
-    P_ELEMENT = "p_element"
-    D_ELEMENT = "d_element"
-
-    def __init__(
-        self,
-        species,
-        node_features="106x0e+4x1e+6x2e+8x3e+4x4e+2x5e+2x6e",
-    ):
-        super().__init__(
-            graphs.UVGraph(species),
-            node_features=node_features,
-            irreps_out="0e",
-        )
-        self._species = tuple(species)
 
     @property
     def species(self) -> Tuple:
@@ -116,6 +91,9 @@ class Rescaler(e3psi.models.Module):
         super().__init__()
         self.shift = shift
         self.scale = scale
+
+    def __str__(self):
+        return f"Rescaler(shift={self.shift},scale={self.scale})"
 
     def forward(self, data):
         # y = mx + c
@@ -169,7 +147,6 @@ def make_predictions(model: e3psi.Model, frame: pd.DataFrame, dtype=None, device
 MODELS = {
     graphs.U: UModel,
     graphs.V: VModel,
-    graphs.UV: UVModel,
 }
 
 HISTORIAN_TYPES = VModel, UModel

@@ -243,6 +243,9 @@ class Trainer(mincepy.SavableObject):
 
     @property
     def best_model(self):
+        if self._checkpointer.best_model is None:
+            return self.model
+
         model = copy.deepcopy(self.model)
         model.load_state_dict(self._checkpointer.best_model)
         return model
