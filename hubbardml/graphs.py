@@ -25,8 +25,8 @@ __all__ = "ModelGraph", "UGraph", "VGraph", "HubbardDataset"
 U = "U"
 V = "V"
 
-DEFAULT_OCCS_TOL = 1e-5
-DEFAULT_PARAM_TOL = 2e-4  # Input Hubbard parameters less than this are considered to be identical
+DEFAULT_OCCS_TOL = 1e-4
+DEFAULT_PARAM_TOL = 5e-4  # Input Hubbard parameters less than this are considered to be identical
 
 
 def diag_mean(mtx):

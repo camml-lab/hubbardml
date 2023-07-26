@@ -92,7 +92,10 @@ class Rescaler(e3psi.models.Module):
         self.shift = shift
         self.scale = scale
 
-    def __str__(self):
+    def __repr__(self) -> str:
+        return str(self)
+
+    def __str__(self) -> str:
         return f"Rescaler(shift={self.shift},scale={self.scale})"
 
     def forward(self, data):
