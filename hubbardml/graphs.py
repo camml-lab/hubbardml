@@ -107,7 +107,7 @@ class TensorElementwiseProduct(e3psi.Attr):
     def create_tensor(self, value: List, dtype=None, device=None) -> torch.Tensor:
         create = functools.partial(self._attr.create_tensor, dtype=dtype, device=device)
         occs_1, occs_2 = tuple(map(create, value))
-        self._tp.to(device=device, dtype=dtype)
+        self._tp.to(device=occs_1.device, dtype=occs_1.dtype)
         return self._tp(occs_1, occs_2)
 
 
@@ -290,6 +290,7 @@ class UGraph(e3psi.graphs.OneSite, ModelGraph):
     def identify_duplicates(
         self, dataset: pd.DataFrame, group_by=DEFAULT_GROUP_BY, tolerances=None
     ) -> pd.DataFrame:
+        group_by = group_by or self.DEFAULT_GROUP_BY
         tolerances = tolerances if tolerances is not None else {}
         occs_tol = tolerances.get("occs_tol", self.OCCS_TOL)
         param_tol = tolerances.get("param_tol", self.PARAM_TOL)
@@ -483,6 +484,7 @@ class VGraph(e3psi.TwoSite, ModelGraph):
     def identify_duplicates(
         self, dataset: pd.DataFrame, group_by=DEFAULT_GROUP_BY, tolerances=None
     ) -> pd.DataFrame:
+        group_by = group_by or self.DEFAULT_GROUP_BY
         tolerances = tolerances or {}
         # Generate tolerances
         occs_tol = tolerances.get("occs_tol", self.OCCS_TOL)
