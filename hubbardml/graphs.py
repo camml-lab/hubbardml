@@ -143,13 +143,12 @@ class USite(Site):
         self, species: Iterable[str], occ_irreps: Union[str, o3.Irrep], with_param_in=True
     ):
         super().__init__(species, occ_irreps)
-        if with_param_in:
-            self.u_in = o3.Irrep("0e")  # The input Hubbard parameter
+        self.u_in = o3.Irrep("0e") if with_param_in else None  # The input Hubbard parameter
 
     def create_inputs(self, tensors: Mapping, dtype=None, device=None) -> Dict:
         """Create a tensor from a dataframe row or dictionary"""
         inputs = super().create_inputs(tensors, dtype=dtype, device=device)
-        if getattr(self, "u_in", None):
+        if self.u_in is not None:
             inputs["u_in"] = e3psi.create_tensor(
                 self.u_in, tensors["u_in"], dtype=dtype, device=device
             )
