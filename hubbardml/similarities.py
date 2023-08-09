@@ -51,6 +51,10 @@ def identify_duplicates(
         total_removed += len(to_remove)
         # deduplicated.drop(index=to_remove, inplace=True)
 
-    _LOGGER.info("Identified %i duplicates", total_removed)
+    _LOGGER.info(
+        "Identified %i duplicates, total unique: %i",
+        total_removed,
+        len(deduplicated[CLUSTER_ID].unique()),
+    )
 
     return deduplicated

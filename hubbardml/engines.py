@@ -69,8 +69,8 @@ class Mae(Metric):
         self._sum_of_absolute_errors += torch.sum(absolute_errors)
         self._num_examples += y.shape[0]
 
-    def compute(self):
-        return self._sum_of_absolute_errors.item() / self._num_examples
+    def compute(self) -> Union[float, torch.Tensor]:
+        return self._sum_of_absolute_errors / self._num_examples
 
 
 class Rmse(Metric):
@@ -81,13 +81,11 @@ class Rmse(Metric):
     def reset(self):
         self._mae.reset()
 
-    @abc.abstractmethod
     def update(self, y, y_pred):
         self._mae.update(y, y_pred)
 
-    @abc.abstractmethod
     def compute(self) -> Union[float, torch.Tensor]:
-        return math.sqrt(self._mae.compute())
+        return torch.sqrt(self._mae.compute())
 
 
 class EventGenerator:

@@ -42,7 +42,8 @@ class PDSite(e3psi.IrrepsObj):
 class VEdge(e3psi.IrrepsObj):
     """An intersite V edge containing a Hubbard V value and a separation distance"""
 
-    def __init__(self) -> None:
+    def __init__(self, with_param_in=True) -> None:
         super().__init__()
         self.v = e3psi.Attr("1x0e")  # The Hubbard V value
-        self.dist = e3psi.Attr("1x0e")  # The distance between the two sites
+        if with_param_in:
+            self.dist = e3psi.Attr("1x0e")  # The distance between the two sites

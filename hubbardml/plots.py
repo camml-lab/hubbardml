@@ -201,7 +201,7 @@ def create_progression_plots(df, yrange: float = None, num_cols=3, max_plots=Non
     return fig
 
 
-def split_plot(df, category_key, axis_label=None, title=None):
+def split_plot(df, category_key: str, axis_label=None, title=None):
     categories = df[category_key].unique()
     fig = plt.figure(figsize=(4, 4))
     fig.suptitle(title)

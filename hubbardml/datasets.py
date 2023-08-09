@@ -1,12 +1,12 @@
-import functools
 import json
 import pathlib
 import random
-from typing import List, Union, Tuple, Set, Iterator, Mapping
+from typing import List, Union, Tuple, Set, Iterator, Mapping, Dict
 
 import ase.data
 import numpy as np
 import pandas as pd
+import torch
 
 from . import keys
 from . import similarities
@@ -269,9 +269,9 @@ def element_pair(row) -> Tuple:
     )
 
 
-def get_occupation_matrices(row: Mapping, atom_idx: int) -> List:
+def get_occupation_matrices(row: Mapping, atom_idx: int) -> Dict[str, torch.Tensor]:
     """Get the occupation matrices for an atom number for teh given row"""
-    return [row[f"atom_{atom_idx}_occs_1"], row[f"atom_{atom_idx}_occs_2"]]
+    return dict(occs1=row[f"atom_{atom_idx}_occs_1"], occs2=row[f"atom_{atom_idx}_occs_2"])
 
 
 def get_self_consistent_paths(df: pd.DataFrame) -> Set[pathlib.Path]:

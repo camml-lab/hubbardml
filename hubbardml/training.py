@@ -86,7 +86,7 @@ class DataLogger(TrainerListener):
         self._data_log.append({"epoch": epoch_num})
 
     def log(self, name: str, value):
-        self._data_log[-1][name] = value
+        self._data_log[-1][name] = value.detach().item()
 
     def as_dataframe(self) -> pd.DataFrame:
         return pd.DataFrame(self._data_log)

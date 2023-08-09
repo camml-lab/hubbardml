@@ -141,12 +141,6 @@ def create_model_inputs(
     return inputs
 
 
-def make_predictions(model: e3psi.Model, frame: pd.DataFrame, dtype=None, device=None):
-    inputs = create_model_inputs(model.graph, frame, dtype=dtype, device=device)
-
-    return model(inputs).detach().cpu().numpy().reshape(-1)
-
-
 MODELS = {
     graphs.U: UModel,
     graphs.V: VModel,

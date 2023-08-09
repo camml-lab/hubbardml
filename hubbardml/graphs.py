@@ -25,8 +25,8 @@ __all__ = "ModelGraph", "UGraph", "VGraph", "HubbardDataset"
 U = "U"
 V = "V"
 
-DEFAULT_OCCS_TOL = 1e-4
-DEFAULT_PARAM_TOL = 5e-4  # Input Hubbard parameters less than this are considered to be identical
+DEFAULT_OCCS_TOL = 2e-4
+DEFAULT_PARAM_TOL = 1e-3  # Input Hubbard parameters less than this are considered to be identical
 
 
 def diag_mean(mtx):
@@ -121,9 +121,9 @@ class Site(sites.Site):
         self.occs_sum = TensorSum(self._occs)
         self.occs_prod = TensorElementwiseProduct(self._occs)  # , filter_ir_out=["0e", "2e"])
 
-    def create_inputs(self, specie, occs1, occs2, dtype=None, device=None) -> Dict:
+    def create_inputs(self, tensors: Mapping, dtype=None, device=None) -> Dict:
         """Create a tensor from a dataframe row or dictionary"""
-        occupations = [occs1, occs2]
+        occupations = [tensors["occs1"], tensors["occs2"]]
 
         # We have to take the absolute value of the occupation matrices here because otherwise we won't
         # be globally invariant to spin flips
@@ -131,7 +131,7 @@ class Site(sites.Site):
 
         tensor_kwargs = dict(dtype=dtype, device=device)
         return dict(
-            specie=e3psi.create_tensor(self.specie, specie, **tensor_kwargs),
+            specie=e3psi.create_tensor(self.specie, tensors["specie"], **tensor_kwargs),
             # Pass the same up/down occupation matrices to both the sum and product
             occs_sum=e3psi.create_tensor(self.occs_sum, occupations, **tensor_kwargs),
             occs_prod=e3psi.create_tensor(self.occs_prod, occupations, **tensor_kwargs),
@@ -139,14 +139,20 @@ class Site(sites.Site):
 
 
 class USite(Site):
-    def __init__(self, species: Iterable[str], occ_irreps: Union[str, o3.Irrep]):
+    def __init__(
+        self, species: Iterable[str], occ_irreps: Union[str, o3.Irrep], with_param_in=True
+    ):
         super().__init__(species, occ_irreps)
-        self.u_in = o3.Irrep("0e")  # The input Hubbard parameter
+        if with_param_in:
+            self.u_in = o3.Irrep("0e")  # The input Hubbard parameter
 
-    def create_inputs(self, specie, occs1, occs2, u_in, dtype=None, device=None) -> Dict:
+    def create_inputs(self, tensors: Mapping, dtype=None, device=None) -> Dict:
         """Create a tensor from a dataframe row or dictionary"""
-        inputs = super().create_inputs(specie, occs1, occs2, dtype=dtype, device=device)
-        inputs["u_in"] = e3psi.create_tensor(self.u_in, u_in, dtype=dtype, device=device)
+        inputs = super().create_inputs(tensors, dtype=dtype, device=device)
+        if getattr(self, "u_in", None):
+            inputs["u_in"] = e3psi.create_tensor(
+                self.u_in, tensors["u_in"], dtype=dtype, device=device
+            )
         return inputs
 
 
@@ -175,17 +181,19 @@ class UGraph(e3psi.graphs.OneSite, ModelGraph):
     OCCS_TOL = DEFAULT_OCCS_TOL
     PARAM_TOL = DEFAULT_PARAM_TOL
 
-    def __init__(self, species: Iterable[str]) -> None:
+    def __init__(self, species: Iterable[str], with_param_in=True) -> None:
         self.species = tuple(species)
-        dsite = USite(species, "2e")  # D site
+        dsite = USite(species, "2e", with_param_in=with_param_in)
         super().__init__(dsite)
 
     def create_inputs(self, row: Mapping, dtype=None, device=None) -> Dict:
         """Create a tensor from a dataframe row or dictionary"""
         site_inputs = self.site.create_inputs(
-            row[keys.ATOM_1_ELEMENT],
-            *datasets.get_occupation_matrices(row, 1),
-            row[keys.PARAM_IN],
+            dict(
+                specie=row[keys.ATOM_1_ELEMENT],
+                param_in=row.get(keys.PARAM_IN, None),
+                **datasets.get_occupation_matrices(row, 1),
+            ),
             dtype=dtype,
             device=device,
         )
@@ -202,6 +210,9 @@ class UGraph(e3psi.graphs.OneSite, ModelGraph):
         # Remove non Hubbard active elements
         df = df[df[keys.ATOM_1_ELEMENT].isin(self.species)]
         df = df[df[keys.ATOM_2_ELEMENT].isin(self.species)]
+        # Remove rows that we can't deal with because they do not have the right electronic configuration
+        df = df[df[keys.ATOM_1_OCCS_1].apply(len) == 5]
+        df = df[df[keys.ATOM_2_OCCS_1].apply(len) == 5]
 
         df[keys.SPECIES] = df.apply(
             lambda row: frozenset([row[keys.ATOM_1_ELEMENT], row[keys.ATOM_2_ELEMENT]]), axis=1
@@ -221,18 +232,16 @@ class UGraph(e3psi.graphs.OneSite, ModelGraph):
 
     def get_similarity_frame(self, dataset: pd.DataFrame, group_by=DEFAULT_GROUP_BY):
         power_spectrum_attrs = ("occs_sum", "occs_prod")
-        dataset = dataset.copy()
-
-        dataset[keys.SC_PATHS] = dataset.apply(
-            lambda row: str(pathlib.Path(row[keys.DIR]).parent), axis=1
-        )
+        dataset = _prepare_dataset(dataset.copy())
 
         # Create the power spectrum operations that we will use for calculating similarity
         inputs = dataset.apply(
             lambda row: self.site.create_inputs(
-                row[keys.ATOM_1_ELEMENT],
-                *datasets.get_occupation_matrices(row, 1),
-                row[keys.PARAM_IN],
+                dict(
+                    specie=row[keys.ATOM_1_ELEMENT],
+                    param_in=row[keys.PARAM_IN],
+                    **datasets.get_occupation_matrices(row, 1),
+                )
             ),
             axis=1,
             result_type="reduce",
@@ -314,15 +323,15 @@ class VGraph(e3psi.TwoSite, ModelGraph):
     DEFAULT_GROUP_BY = P_ELEMENT, D_ELEMENT
 
     OCCS_TOL = DEFAULT_OCCS_TOL
-    PARAM_TOL = DEFAULT_PARAM_TOL
-    DIST_TOL = 1e-1
+    PARAM_TOL = 5e-3
+    DIST_TOL = 4e-3
 
-    def __init__(self, species: Iterable[str]):
+    def __init__(self, species: Iterable[str], with_param_in=True):
         # Create the graph by supplying the sites
         self._species = tuple(species)
         psite = Site(species, "1o")
         dsite = Site(species, "2e")
-        super().__init__(psite, dsite, sites.VEdge())
+        super().__init__(psite, dsite, sites.VEdge(with_param_in=with_param_in))
 
     @property
     def species(self) -> Tuple[str]:
@@ -348,8 +357,10 @@ class VGraph(e3psi.TwoSite, ModelGraph):
         _check_shape(row, key("occs", didx, 2), (5, 5))
 
         psite_inputs = self.site1.create_inputs(
-            row[key("element", pidx)],
-            *datasets.get_occupation_matrices(row, pidx),
+            dict(
+                specie=row[key("element", pidx)],
+                **datasets.get_occupation_matrices(row, pidx),
+            ),
             dtype=dtype,
             device=device,
         )
@@ -362,8 +373,10 @@ class VGraph(e3psi.TwoSite, ModelGraph):
         )
 
         dsite_inputs = self.site2.create_inputs(
-            row[key("element", didx)],
-            *datasets.get_occupation_matrices(row, didx),
+            dict(
+                specie=row[key("element", didx)],
+                **datasets.get_occupation_matrices(row, didx),
+            ),
             dtype=dtype,
             device=device,
         )
@@ -376,7 +389,7 @@ class VGraph(e3psi.TwoSite, ModelGraph):
         )
 
         edge_tensor = e3psi.create_tensor(
-            self.edge, dict(v=row[keys.PARAM_IN], dist=row[keys.DIST_IN]), **kwargs
+            self.edge, dict(v=row.get(keys.PARAM_IN, None), dist=row[keys.DIST_IN]), **kwargs
         )
 
         return dict(
@@ -387,7 +400,7 @@ class VGraph(e3psi.TwoSite, ModelGraph):
 
     @classmethod
     def prepare_dataset(cls, dataframe: pd.DataFrame) -> pd.DataFrame:
-        df = datasets.filter_dataset(
+        dataframe = datasets.filter_dataset(
             dataframe,
             param_type=keys.PARAM_V,
             remove_vwd=True,
@@ -395,47 +408,49 @@ class VGraph(e3psi.TwoSite, ModelGraph):
             remove_in_eq_out=False,
         )
         # Exclude all those that have P-P of D-D elements as this model can't deal with those
-        df = df[
-            ~df.apply(
+        dataframe = dataframe[
+            ~dataframe.apply(
                 lambda row: row[keys.ATOM_1_OCCS_1].shape[0] == row[keys.ATOM_2_OCCS_1].shape[0],
                 axis=1,
             )
         ]
 
-        df[keys.SPECIES] = df.apply(
+        dataframe[keys.SPECIES] = dataframe.apply(
             lambda row: frozenset([row[keys.ATOM_1_ELEMENT], row[keys.ATOM_2_ELEMENT]]), axis=1
         )
-        df[cls.P_ELEMENT] = df.apply(
+        dataframe[cls.P_ELEMENT] = dataframe.apply(
             lambda row: row[keys.ATOM_1_ELEMENT]
             if row[keys.ATOM_1_OCCS_1].shape[0] == 3
             else row[keys.ATOM_2_ELEMENT],
             axis=1,
         )
-        df[cls.D_ELEMENT] = df.apply(
+        dataframe[cls.D_ELEMENT] = dataframe.apply(
             lambda row: row[keys.ATOM_1_ELEMENT]
             if row[keys.ATOM_2_OCCS_1].shape[0] == 3
             else row[keys.ATOM_2_ELEMENT],
             axis=1,
         )
-        df[keys.LABEL] = df.apply(lambda row: f"{row[cls.D_ELEMENT]}-{row[cls.P_ELEMENT]}", axis=1)
-        df[keys.COLOUR] = df[cls.D_ELEMENT].map(plots.element_colours)
-        df = _prepare_dataset(df)
+        dataframe[keys.LABEL] = dataframe.apply(
+            lambda row: f"{row[cls.D_ELEMENT]}-{row[cls.P_ELEMENT]}", axis=1
+        )
+        dataframe[keys.COLOUR] = dataframe[cls.D_ELEMENT].map(plots.element_colours)
+        dataframe = _prepare_dataset(dataframe)
 
-        return df
+        return dataframe
 
     def get_similarity_frame(self, dataset: pd.DataFrame, group_by=DEFAULT_GROUP_BY):
         power_spectrum_attrs = ("occs_sum", "occs_prod")
-        dataset = dataset.copy()
-        dataset[keys.SC_PATHS] = dataset.apply(
-            lambda row: str(pathlib.Path(row[keys.DIR]).parent), axis=1
-        )
+        dataset = _prepare_dataset(dataset.copy())
 
         def tmp_input_creator(row: Mapping, site_idx: int):
             site_name = f"site{site_idx}"
             site: Site = getattr(self, site_name)
             atom_idx = self.get_pd_idx(row)[site_idx - 1]
             return site.create_inputs(
-                row[key("element", atom_idx)], *datasets.get_occupation_matrices(row, atom_idx)
+                dict(
+                    specie=row[key("element", atom_idx)],
+                    **datasets.get_occupation_matrices(row, atom_idx),
+                )
             )
 
         for site_idx in (1, 2):
@@ -536,7 +551,7 @@ class HubbardDataset(torch.utils.data.Dataset):
 
         row = self._df.iloc[item]
         inp = self._graph.create_inputs(row, dtype=self._dtype, device=self._device)
-        label = torch.tensor([row[self._target_column]], dtype=self._dtype, device=self._device)
+        label = torch.as_tensor([row[self._target_column]], dtype=self._dtype, device=self._device)
         self._cache[item] = inp, label
 
         return inp, label
