@@ -1,0 +1,9 @@
+# @package _global_
+
+prepare_data:
+  _target_: experiment.predict_from_first_iter.prepare_data
+  _partial_: True
+  param_cutoff: ${hubbard_param_cutoff}
+
+train:
+  max_epochs: 20_000

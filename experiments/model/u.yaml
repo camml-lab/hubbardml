@@ -1,0 +1,26 @@
+# @package _global_
+
+# Configuration of the Hubbard parameter being predicted
+hubbard_param: U
+hubbard_param_cutoff: 0.2  # eV
+mul: 4
+feature_irreps: ${mul}x0e + ${mul}x1e + ${mul}x2e + ${mul}x3e
+
+species:
+  - Ni
+  - Mn
+  - Fe
+
+graph:
+  _target_: hubbardml.graphs.UGraph
+  species: "${species}"
+
+model:
+  _target_: hubbardml.models.UModel
+  _partial_: True
+  feature_irreps: "${feature_irreps}"
+  hidden_layers: 2
+  irrep_normalization: component
+
+train:
+  batch_size: 8 # As we have so little data, reducing the batch size helps to reduce overfitting significantly

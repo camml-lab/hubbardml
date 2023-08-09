@@ -1,0 +1,17 @@
+# @package _global_
+
+# Randomly split the data according to the species
+prepare_data:
+  _target_: experiment.predict_hp.prepare_data
+  _partial_: True
+  _convert_: all
+  param_cutoff: ${hubbard_param_cutoff}
+  split_fraction: 0.2
+  group_by:
+    - species
+    - sc_paths
+  duplicate_tolerances: null
+
+train:
+  batch_size: 1024
+  max_epochs: 30_000

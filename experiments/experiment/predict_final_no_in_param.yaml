@@ -1,0 +1,18 @@
+# @package _global_
+
+prepare_data:
+  _target_: experiment.predict_final.prepare_data
+  _partial_: True
+  _convert_: all
+  param_cutoff: ${hubbard_param_cutoff}
+  training_split: 0.2
+  group_by:
+    - species
+    - sc_paths
+
+graph:
+  with_param_in: False
+
+train:
+  batch_size: 1024
+  max_epochs: 20_000

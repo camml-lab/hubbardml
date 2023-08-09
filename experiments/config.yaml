@@ -1,0 +1,46 @@
+seed: 0xDEADBEEF
+dtype: float32
+device: cuda
+
+# Load specialisations
+defaults:
+  - _self_
+  - model: u
+  - experiment: train
+
+# Dataset
+dataset:
+  _target_: hubbardml.datasets.load
+  filename: '../data/data_uv_2023_8_2.json'
+
+target_column: param_out
+
+# Data manipulation
+rescale: mean
+
+# Training
+optimiser:
+  _target_: torch.optim.AdamW
+  _partial_: true  # Need to pass this the model parameters so only partially construct
+  lr: 0.005  # Good for converging to low losses (although maybe a bit slow)
+
+trainer:
+  _target_: hubbardml.training.Trainer
+  _partial_: True
+  overfitting_window: 200
+  loss_fn:
+    _target_: torch.nn.MSELoss
+
+train:
+  min_epochs: 0
+  max_epochs: 20_000
+  batch_size: 64
+
+
+#hydra:job.chdir: False
+hydra:
+  run:
+    dir: outputs/${hydra.job.override_dirname}/${now:%Y-%m-%d}_${now:%H-%M-%S}
+  sweep:
+    dir: outputs/
+    subdir: ${hydra.job.override_dirname}/${now:%Y-%m-%d}_${now:%H-%M-%S}

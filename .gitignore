@@ -444,4 +444,5 @@ $RECYCLE.BIN/
 .idea/*
 notebooks/
 data/
-experiments/
+experiments/outputs/
+experiments/plots/

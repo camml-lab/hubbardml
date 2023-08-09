@@ -1,0 +1,4 @@
+# @package _global_
+
+# This is the default task, it doesn't do anything, just trains on the dataset provided
+prepare_data: null
