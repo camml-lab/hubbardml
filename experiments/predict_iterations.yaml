@@ -7,12 +7,12 @@ trainer:
 
 train:
   max_epochs: 20_000
-  batch_size: 1024
+  batch_size: 16
 
 
 hydra:
   run:
-    dir: outputs/olivines/batch_size=${train.batch_size},max_epochs=${train.max_epochs}/${now:%Y-%m-%d}_${now:%H-%M-%S}
+    dir: outputs/predict_iterations/batch_size=${train.batch_size},max_epochs=${train.max_epochs}/${now:%Y-%m-%d}_${now:%H-%M-%S}
   sweep:
-    dir: outputs/olivines/
+    dir: outputs/predict_iterations/
     subdir: ${hydra.job.override_dirname}/${now:%Y-%m-%d}_${now:%H-%M-%S}

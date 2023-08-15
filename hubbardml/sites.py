@@ -44,5 +44,6 @@ class VEdge(e3psi.IrrepsObj):
 
     def __init__(self, with_param_in=True) -> None:
         super().__init__()
-        self.v = e3psi.Attr("1x0e") if with_param_in else None  # The Hubbard V value
         self.dist = e3psi.Attr("1x0e")  # The distance between the two sites
+        if with_param_in:
+            self.v = e3psi.Attr("1x0e")  # The input Hubbard V value

@@ -70,7 +70,12 @@ def train(cfg: omegaconf.DictConfig) -> None:
 def do_train(
     dataset, graph, cfg: omegaconf.DictConfig, output_dir: pathlib.Path
 ) -> training.Trainer:
-    _LOGGER.info("Data splits set:\n%s", dataset[keys.TRAINING_LABEL, keys.SPECIES].value_counts())
+    _LOGGER.info(
+        "Data splits set:\n%s",
+        dataset[[keys.TRAINING_LABEL, keys.LABEL]]
+        .groupby(keys.TRAINING_LABEL)
+        .value_counts(sort=False),
+    )
 
     device = cfg.get("device")
     target_column = cfg["target_column"]
@@ -193,6 +198,9 @@ def analyse(
         parity_fig.savefig(_plot_path("parity"), bbox_inches="tight")
 
         for training_label in param_frame[keys.TRAINING_LABEL].unique():
+            if training_label is None:
+                continue
+
             subset = param_frame[param_frame[keys.TRAINING_LABEL] == training_label]
             fraction = len(subset) / len(param_frame)
             rmse = datasets.rmse(subset, training_label=training_label)

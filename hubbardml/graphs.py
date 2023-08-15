@@ -143,12 +143,13 @@ class USite(Site):
         self, species: Iterable[str], occ_irreps: Union[str, o3.Irrep], with_param_in=True
     ):
         super().__init__(species, occ_irreps)
-        self.u_in = o3.Irrep("0e") if with_param_in else None  # The input Hubbard parameter
+        if with_param_in:
+            self.u_in = o3.Irrep("0e")  # The input Hubbard parameter
 
     def create_inputs(self, tensors: Mapping, dtype=None, device=None) -> Dict:
         """Create a tensor from a dataframe row or dictionary"""
         inputs = super().create_inputs(tensors, dtype=dtype, device=device)
-        if self.u_in is not None:
+        if getattr(self, "u_in", None) is not None:
             inputs["u_in"] = e3psi.create_tensor(
                 self.u_in, tensors["u_in"], dtype=dtype, device=device
             )
@@ -190,7 +191,7 @@ class UGraph(e3psi.graphs.OneSite, ModelGraph):
         site_inputs = self.site.create_inputs(
             dict(
                 specie=row[keys.ATOM_1_ELEMENT],
-                param_in=row.get(keys.PARAM_IN, None),
+                u_in=row.get(keys.PARAM_IN, None),
                 **datasets.get_occupation_matrices(row, 1),
             ),
             dtype=dtype,
@@ -238,7 +239,7 @@ class UGraph(e3psi.graphs.OneSite, ModelGraph):
             lambda row: self.site.create_inputs(
                 dict(
                     specie=row[keys.ATOM_1_ELEMENT],
-                    param_in=row[keys.PARAM_IN],
+                    u_in=row[keys.PARAM_IN],
                     **datasets.get_occupation_matrices(row, 1),
                 )
             ),

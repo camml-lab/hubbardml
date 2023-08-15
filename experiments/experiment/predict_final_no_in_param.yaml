@@ -14,5 +14,5 @@ graph:
   with_param_in: False
 
 train:
-  batch_size: 1024
+  batch_size: 256
   max_epochs: 20_000

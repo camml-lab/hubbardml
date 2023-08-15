@@ -25,6 +25,7 @@ train_validate_colours = {
     keys.TRAIN: plot_colours[2],
     keys.VALIDATE: plot_colours[1],
     keys.TEST: plot_colours[0],
+    keys.REFERENCE: plot_colours[3],
 }
 
 element_colours = {
@@ -82,7 +83,7 @@ def create_parity_plot(df, axis_label=None, title=None) -> plt.Figure:
     validate = df[df[keys.TRAINING_LABEL] == keys.VALIDATE]
     train = df[df[keys.TRAINING_LABEL] == keys.TRAIN]
 
-    fig = plt.figure(figsize=(4, 4))
+    fig = plt.figure(figsize=(3.5, 3.5))
     fig.suptitle(title)
 
     minval, maxval = _minmax(df, keys.PARAM_OUT, keys.PARAM_OUT_PREDICTED)
@@ -203,7 +204,7 @@ def create_progression_plots(df, yrange: float = None, num_cols=3, max_plots=Non
 
 def split_plot(df, category_key: str, axis_label=None, title=None):
     categories = df[category_key].unique()
-    fig = plt.figure(figsize=(4, 4))
+    fig = plt.figure(figsize=(3.5, 3.5))
     fig.suptitle(title)
 
     # Calculate the plot ranges
@@ -240,7 +241,7 @@ def split_plot(df, category_key: str, axis_label=None, title=None):
 
 
 def plot_training_curves(training_run: pd.DataFrame, logscale=True) -> plt.Figure:
-    fig = plt.figure(figsize=(6, 3))
+    fig = plt.figure(figsize=(7, 3))
     fig.suptitle("Training curves")
     ax = fig.gca()
 

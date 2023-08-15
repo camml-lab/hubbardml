@@ -56,6 +56,7 @@ TRAIN = "train"
 TEST = "test"
 VALIDATE = "validate"
 DUPLICATE = "duplicate"
+REFERENCE = "reference"
 
 ATOM_SPECIES_1_HOT = "atom_sepcies_1_tensor"
 ATOM_SPECIES_2_HOT = "atom_sepcies_2_tensor"
