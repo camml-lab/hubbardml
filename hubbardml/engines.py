@@ -125,7 +125,7 @@ class Engine:
     def step(self, data: Iterable) -> Generator:
         """Perform one epoch"""
         self._events.fire_event(EngineListener.epoch_starting, self)
-        device = self._model.device
+        device = get_device(self._model)
 
         total_batch_size = 0
         for batch_idx, batch in enumerate(data):
@@ -164,3 +164,10 @@ def _to(obj, device):
         return obj
     else:
         raise TypeError(obj)
+
+
+def get_device(module: torch.nn.Module):
+    try:
+        return next(module.parameters()).device
+    except StopIteration:
+        return "cpu"

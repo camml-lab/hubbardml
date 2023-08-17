@@ -1,5 +1,6 @@
 import functools
 import logging
+import math
 import pathlib
 from typing import Tuple, Union
 
@@ -24,6 +25,13 @@ _LOGGER = logging.getLogger(__name__)
 
 TRAINER = "trainer.pth"
 MODEL = "model.pth"
+
+# Batch size used whenever we are just doing inference (e.g. validation/test), this should be as large as
+# possible while still fitting in memory
+INFERENCE_BATCH_SIZE = 2048
+
+AUTO_BATCH_SIZE = "auto"
+AUTO_BATCH_LIMIT = 3072
 
 
 def checkpoint(trainer: training.Trainer, output_dir: pathlib.Path):
@@ -95,11 +103,15 @@ def do_train(
     # Create optimiser, trainer, etc
     optimiser = hydra.utils.instantiate(cfg["optimiser"])(model.parameters())
     batch_size = cfg["train"]["batch_size"]
+    if batch_size == AUTO_BATCH_SIZE:
+        batch_size = int(max((len(train_data) / AUTO_BATCH_LIMIT) ** 2 * AUTO_BATCH_LIMIT, 1))
+        _LOGGER.info("Using auto batch size: %i/%i", batch_size, len(train_data))
+
     trainer: training.Trainer = hydra.utils.instantiate(cfg["trainer"])(
         model=model,
         opt=optimiser,
         train_data=torch.utils.data.DataLoader(train_data, batch_size=batch_size),
-        validate_data=torch.utils.data.DataLoader(validate_data, batch_size=batch_size),
+        validate_data=torch.utils.data.DataLoader(validate_data, batch_size=INFERENCE_BATCH_SIZE),
     )
     # Use GPU if asked to
     if "device" in cfg:
@@ -118,7 +130,7 @@ def do_train(
 
     # Make predictions using the trained model
     dataset = infer(
-        model, dataset, device=device, target_column=target_column, batch_size=batch_size
+        model, dataset, device=device, target_column=target_column, batch_size=INFERENCE_BATCH_SIZE
     )
 
     dataset.to_json(output_dir / "dataset.json")

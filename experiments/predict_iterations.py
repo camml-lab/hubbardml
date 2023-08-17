@@ -70,7 +70,7 @@ def train_iterations(cfg: omegaconf.DictConfig) -> None:
 
     results_frame = get_results_frame(output_dir)
     for uv_iter in uv_iters:
-        _LOGGER.info("Starting uv_iter: %s", uv_iter)
+        _LOGGER.info("Starting uv_iter: %s (validating on this) ", uv_iter)
         # Exclude all rows from the experiment, and then manually activate validation and training for those we want
         data[keys.TRAINING_LABEL] = None
 
@@ -98,7 +98,7 @@ def train_iterations(cfg: omegaconf.DictConfig) -> None:
 
         # This will set the training label to DUPLICATE for all but one entry in each cluster of identical inputs
         dups = graph.identify_duplicates(
-            data[data[keys.TRAINING_LABEL] == keys.VALIDATE].copy(),
+            data[data[keys.TRAINING_LABEL] == keys.VALIDATE],
             group_by=[keys.SPECIES, keys.SC_PATHS],
         )
         # Copy over the duplicates label to our set
