@@ -1,13 +1,17 @@
 defaults:
   - config
 
+mul: 4
+feature_irreps: ${mul}x0e + ${mul}x1e + ${mul}x2e + ${mul}x3e
+
+
 trainer:
   # Use high overfitting window as training curves for this experiment can be chaotic
   overfitting_window: 2000
 
 train:
-  max_epochs: 100
-  batch_size: auto
+  max_epochs: 12_000
+  batch_size: 64
 
 
 hydra:

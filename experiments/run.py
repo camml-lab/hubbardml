@@ -11,6 +11,7 @@ import omegaconf
 import pandas as pd
 import torch
 import torch.utils.data
+import torch.optim.lr_scheduler
 
 import hubbardml.utils
 from hubbardml import datasets
@@ -31,7 +32,7 @@ MODEL = "model.pth"
 INFERENCE_BATCH_SIZE = 2048
 
 AUTO_BATCH_SIZE = "auto"
-AUTO_BATCH_LIMIT = 3072
+AUTO_BATCH_LIMIT = 2048
 
 
 def checkpoint(trainer: training.Trainer, output_dir: pathlib.Path):
@@ -102,6 +103,8 @@ def do_train(
 
     # Create optimiser, trainer, etc
     optimiser = hydra.utils.instantiate(cfg["optimiser"])(model.parameters())
+    # Try a decaying learning schedule
+
     batch_size = cfg["train"]["batch_size"]
     if batch_size == AUTO_BATCH_SIZE:
         batch_size = int(max((len(train_data) / AUTO_BATCH_LIMIT) ** 2 * AUTO_BATCH_LIMIT, 1))
@@ -117,13 +120,18 @@ def do_train(
     if "device" in cfg:
         trainer.to(cfg["device"])
 
+    if cfg.get("scheduler") is not None:
+        scheduler = hydra.utils.instantiate(cfg["scheduler"])(optimiser)
+        trainer.add_trainer_listener(SchedulerListener(scheduler))
+
     train = cfg["train"]
-    trainer.train(
+    outcome = trainer.train(
         min_epochs=train["min_epochs"],
         max_epochs=train["max_epochs"],
         callback=functools.partial(checkpoint, output_dir=output_dir),
         callback_period=50,
     )
+    _LOGGER.info("Training finished: %s", outcome)
 
     # Take the model with the lowest validation loss
     model = trainer.best_model
@@ -178,6 +186,8 @@ def analyse(
 ):
     if keys.PARAM_OUT_PREDICTED not in df:
         raise RuntimeError("The predicted parameter values must be set before calling analyse()")
+
+    _LOGGER.info("Performing analysis and storing to: %s", output_path)
 
     plots_path = pathlib.Path(output_path) / "plots"
     plots_path.mkdir(exist_ok=True)
@@ -267,6 +277,16 @@ def infer(
 
 def _to_mev_string(energy):
     return f"{energy * 1000:.0f} meV"
+
+
+class SchedulerListener(training.TrainerListener):
+    def __init__(self, scheduler: torch.optim.lr_scheduler.LRScheduler):
+        self._scheduler = scheduler
+
+    def epoch_ended(self, trainer: training.Trainer, epoch_num: int):
+        self._scheduler.step()
+        if self._scheduler.get_lr() != self._scheduler.get_last_lr():
+            _LOGGER.info("Learning rate changed to: %s", self._scheduler.get_last_lr())
 
 
 if __name__ == "__main__":

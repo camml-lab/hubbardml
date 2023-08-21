@@ -70,7 +70,7 @@ def plot_series(ax, xdat, ydat, color, label, size=50):
     )
 
 
-def create_parity_plot(df, axis_label=None, title=None) -> plt.Figure:
+def create_parity_plot(df: pd.DataFrame, axis_label=None, title=None) -> plt.Figure:
     """
     Create parity plot from validation and training label
 

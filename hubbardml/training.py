@@ -70,10 +70,10 @@ def train_model(
 
 
 class TrainerListener:
-    def epoch_started(self, trainer: "Trainer", epoch_num):
+    def epoch_started(self, trainer: "Trainer", epoch_num: int):
         """Called when an epoch starts"""
 
-    def epoch_ended(self, trainer: "Trainer", epoch_num):
+    def epoch_ended(self, trainer: "Trainer", epoch_num: int):
         """Called when an epoch ends"""
 
 
@@ -224,10 +224,10 @@ class Trainer(mincepy.SavableObject):
         self._epoch = 0
 
         self.training = engines.Engine(self._model)
-        self.training.add_engine_listener(engines.Mae("mse"))
+        self.training.add_engine_listener(engines.Mse("mse"))
 
         self.validation = engines.Engine(self._model)
-        self.validation.add_engine_listener(engines.Mae("mse"))
+        self.validation.add_engine_listener(engines.Mse("mse"))
         self.validation.add_engine_listener(engines.Rmse("rmse"))
 
         # Save checkpoints using the MSE
@@ -329,11 +329,11 @@ class Trainer(mincepy.SavableObject):
                 with torch.no_grad():
                     self.validation.run(self._validate_loader)
 
+                self._events.fire_event(TrainerListener.epoch_ended, self, self.epoch)  # EPOCH END
+
                 self._data_logger.log(keys.TRAIN_LOSS, self.training.metrics[MSE])
                 self._data_logger.log(keys.VALIDATE_LOSS, self.validation.metrics[MSE])
                 self._data_logger.log("validate_rmse", self.validation.metrics[RMSE])
-
-                self._events.fire_event(TrainerListener.epoch_ended, self, self.epoch)  # EPOCH END
 
                 self._epoch += 1
 

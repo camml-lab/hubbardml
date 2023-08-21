@@ -22,18 +22,24 @@ rescale: mean
 optimiser:
   _target_: torch.optim.AdamW
   _partial_: true  # Need to pass this the model parameters so only partially construct
-  lr: 0.005  # Good for converging to low losses (although maybe a bit slow)
+  lr: 0.02
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.StepLR
+  _partial_: true  # Need to pass this the optimiser so only partially construct
+  step_size: 2000
+  gamma: 0.5
 
 trainer:
   _target_: hubbardml.training.Trainer
   _partial_: True
-  overfitting_window: 200
+  overfitting_window: 1000
   loss_fn:
     _target_: torch.nn.MSELoss
 
 train:
   min_epochs: 0
-  max_epochs: 20_000
+  max_epochs: 12_000
   batch_size: 64
 
 

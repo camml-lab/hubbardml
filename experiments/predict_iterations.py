@@ -14,6 +14,7 @@ from hubbardml import datasets
 from hubbardml import keys
 from hubbardml import graphs
 from hubbardml import training
+from experiment import predict_from_first_iter
 
 import run
 
@@ -70,31 +71,7 @@ def train_iterations(cfg: omegaconf.DictConfig) -> None:
 
     results_frame = get_results_frame(output_dir)
     for uv_iter in uv_iters:
-        _LOGGER.info("Starting uv_iter: %s (validating on this) ", uv_iter)
-        # Exclude all rows from the experiment, and then manually activate validation and training for those we want
-        data[keys.TRAINING_LABEL] = None
-
-        # Train on all previous iterations
-        data.loc[data[keys.UV_ITER] < uv_iter, keys.TRAINING_LABEL] = keys.TRAIN
-
-        # Train only on the first iteration
-        for path, sc_rows in datasets.iter_self_consistent_paths(data):
-            for pair, rows in datasets.iter_atom_idx_pairs(sc_rows):
-                min_iter = rows[keys.UV_ITER].min()
-                if min_iter < uv_iter:
-                    # Find the data from the previous iteration that has a result
-                    previous_iter = rows.loc[rows[keys.UV_ITER] < uv_iter, keys.UV_ITER].max()
-                    previous_iter_row = rows[rows[keys.UV_ITER] == previous_iter]
-
-                    # Set the current and all future iterations as validation
-                    next_iters = rows[rows[keys.UV_ITER] == uv_iter]
-                    data.loc[next_iters.index, keys.TRAINING_LABEL] = keys.VALIDATE
-                    # Set the predicted parameter out to be the previous iteration.
-                    # This allows us to simulate the error we _would_ make if used the Hubbard param. from the previous
-                    # iteration i.e. didn't do any more linear-response calculations
-                    data.loc[next_iters.index, keys.PARAM_OUT_PREDICTED] = previous_iter_row[
-                        keys.PARAM_OUT
-                    ].item()
+        data = predict_from_first_iter.set_training_labels(data, uv_iter, include_subsequent=False)
 
         # This will set the training label to DUPLICATE for all but one entry in each cluster of identical inputs
         dups = graph.identify_duplicates(

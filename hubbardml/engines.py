@@ -56,36 +56,56 @@ class Metric(EngineListener):
 class Mae(Metric):
     def __init__(self, save_as: str):
         super().__init__(save_as)
-        self._sum_of_absolute_errors = 0.0
+        self._sum_of_abs_errors = 0.0
         self._num_examples = 0
 
     def reset(self):
-        self._sum_of_absolute_errors = 0.0
+        self._sum_of_abs_errors = 0.0
         self._num_examples = 0
 
     def update(self, y, y_pred):
         y_pred, y = y_pred.detach(), y.detach()
         absolute_errors = torch.abs(y_pred - y.view_as(y_pred))
-        self._sum_of_absolute_errors += torch.sum(absolute_errors)
+        self._sum_of_abs_errors += torch.sum(absolute_errors)
         self._num_examples += y.shape[0]
 
     def compute(self) -> Union[float, torch.Tensor]:
-        return self._sum_of_absolute_errors / self._num_examples
+        return self._sum_of_abs_errors / self._num_examples
+
+
+class Mse(Metric):
+    def __init__(self, save_as: str):
+        super().__init__(save_as)
+        self._sum_of_sq_errors = 0.0
+        self._num_examples = 0
+
+    def reset(self):
+        self._sum_of_sq_errors = 0.0
+        self._num_examples = 0
+
+    def update(self, y, y_pred):
+        y_pred, y = y_pred.detach(), y.detach()
+        sq_errors = (y_pred - y.view_as(y_pred)) ** 2
+        self._sum_of_sq_errors += torch.sum(sq_errors)
+        self._num_examples += y.shape[0]
+
+    def compute(self) -> Union[float, torch.Tensor]:
+        return self._sum_of_sq_errors / self._num_examples
 
 
 class Rmse(Metric):
     def __init__(self, save_as: str):
         super().__init__(save_as)
-        self._mae = Mae(save_as)
+        self._mse = Mse(save_as)
 
     def reset(self):
-        self._mae.reset()
+        self._mse.reset()
 
     def update(self, y, y_pred):
-        self._mae.update(y, y_pred)
+        self._mse.update(y, y_pred)
 
     def compute(self) -> Union[float, torch.Tensor]:
-        return torch.sqrt(self._mae.compute())
+        return torch.sqrt(self._mse.compute())
 
 
 class EventGenerator:
