@@ -1,7 +1,7 @@
 import json
 import pathlib
 import random
-from typing import List, Union, Tuple, Set, Iterator, Mapping, Dict
+from typing import List, Union, Tuple, Set, Iterator, Mapping, Dict, Optional
 
 import ase.data
 import numpy as np
@@ -229,11 +229,15 @@ def load(filename: Union[pathlib.Path, str], param_cutoff=None) -> pd.DataFrame:
     return preprocess(df)
 
 
-def rmse(df: pd.DataFrame, training_label: str = keys.VALIDATE) -> float:
+def rmse(
+    df: pd.DataFrame,
+    training_label: Optional[str] = keys.VALIDATE,
+    prediction_key: str = keys.PARAM_OUT_PREDICTED,
+) -> float:
     if training_label is not None:
         df = df[df[keys.TRAINING_LABEL] == training_label]
 
-    return utils.rmse(df[keys.PARAM_OUT], df[keys.PARAM_OUT_PREDICTED])
+    return utils.rmse(df[keys.PARAM_OUT], df[prediction_key])
 
 
 def _create_array(occu: Union[List, np.ndarray]) -> np.ndarray:

@@ -4,7 +4,7 @@
 hubbard_param: U
 hubbard_param_cutoff: 0.2  # eV
 mul: 4
-feature_irreps: ${mul}x0e + ${mul}x1e + ${mul}x2e + ${mul}x3e
+feature_irreps: ${mul}x0e + ${mul}x1e + ${mul}x2e # + ${mul}x3e
 
 species:
   - Ni

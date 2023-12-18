@@ -77,7 +77,7 @@ def train(cfg: omegaconf.DictConfig) -> None:
 
 
 def do_train(
-    dataset, graph, cfg: omegaconf.DictConfig, output_dir: pathlib.Path
+    dataset: pd.DataFrame, graph, cfg: omegaconf.DictConfig, output_dir: pathlib.Path
 ) -> training.Trainer:
     _LOGGER.info(
         "Data splits set:\n%s",

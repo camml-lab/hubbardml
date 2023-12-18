@@ -7,7 +7,7 @@ trainer:
 
 train:
   max_epochs: 12_000
-  batch_size: 64
+  batch_size: 16
 
 
 hydra:

@@ -202,13 +202,19 @@ def create_progression_plots(df, yrange: float = None, num_cols=3, max_plots=Non
     return fig
 
 
-def split_plot(df, category_key: str, axis_label=None, title=None):
+def split_plot(
+    df: pd.DataFrame,
+    category_key: str,
+    axis_label: str = None,
+    title: str = None,
+    prediction_key: str = keys.PARAM_OUT_PREDICTED,
+) -> plt.Figure:
     categories = df[category_key].unique()
     fig = plt.figure(figsize=(3.5, 3.5))
     fig.suptitle(title)
 
     # Calculate the plot ranges
-    minval, maxval = _minmax(df, keys.PARAM_OUT, keys.PARAM_OUT_PREDICTED)
+    minval, maxval = _minmax(df, keys.PARAM_OUT, prediction_key)
     ranges = (minval - 0.1 * np.abs(minval), maxval + 0.1 * np.abs(maxval))
 
     plt.plot(ranges, ranges, c="black", zorder=3)
@@ -217,7 +223,7 @@ def split_plot(df, category_key: str, axis_label=None, title=None):
         subset = df[df[category_key] == category]
 
         vals = subset[keys.PARAM_OUT]
-        predicted = subset[keys.PARAM_OUT_PREDICTED]
+        predicted = subset[prediction_key]
 
         rmse = np.linalg.norm(vals - predicted) / np.sqrt(len(vals))
         plt.scatter(
