@@ -3,7 +3,7 @@ import collections
 import functools
 import operator
 import pathlib
-from typing import Iterable, Dict, List, Union, Tuple, Mapping
+from typing import Iterable, Dict, List, Union, Tuple, Mapping, Any
 import uuid
 
 from e3nn import o3
@@ -72,6 +72,12 @@ class TensorSum(e3psi.Attr):
     def create_tensor(self, value: List, dtype=None, device=None) -> torch.Tensor:
         create = functools.partial(self._attr.create_tensor, dtype=dtype, device=device)
         return sum(map(create, value)) / len(value)
+
+    def __eq__(self, other: Union[Any, "TensorSum"]) -> bool:
+        if not isinstance(other, TensorSum):
+            return False
+
+        return self._attr == other._attr
 
 
 class TensorElementwiseProduct(e3psi.Attr):

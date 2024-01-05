@@ -27,7 +27,7 @@ requires-python = ">=3.7"
 dependencies = [
     "ase",
     "e3nn>=0.5.1",
-    "e3psi",
+    "e3psi~=0.3",
     "hydra-core",
     "matplotlib",
     "mincepy[sci]",
