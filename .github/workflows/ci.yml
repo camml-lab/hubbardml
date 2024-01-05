@@ -41,7 +41,7 @@ jobs:
           port: 27017
 
       - name: Run pytest
-        run: pytest --cov=hubbardml -sv -p no:nb_regression tests
+        run: pytest -sv -p no:nb_regression tests
 
       - name: Create xml coverage
         run: coverage xml
