@@ -44,7 +44,9 @@ END_END_FINAL_COORDINATES = "End final coordinates"
 FLOAT_NUMBER = r"[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?"
 RE_ATOM_LINE = re.compile(r"\s+Atom:\s+(\d+)\s+Spin:\s+(\d+)")
 RE_CELL_PARAMETERS = re.compile(r"CELL_PARAMETERS \(alat=\s*([\.\d]+)\)")
-RE_ATOMIC_POS_LINE = re.compile(rf"([^\s]+)\s+({FLOAT_NUMBER})\s+({FLOAT_NUMBER})\s+({FLOAT_NUMBER})*")
+RE_ATOMIC_POS_LINE = re.compile(
+    rf"([^\s]+)\s+({FLOAT_NUMBER})\s+({FLOAT_NUMBER})\s+({FLOAT_NUMBER})*"
+)
 RE_HUBBARD_ENTRY = re.compile(r"hubbard_v\((\d+),(\d+),(\d+)\)")
 
 
@@ -154,7 +156,9 @@ def parse_pw_uvout(filename) -> Dict:
                 nsg_lines = _consume_until(line_iter, END_NSG)
                 occs_blocks.append(_parse_occs_blocks(nsg_lines))
             elif START_FINAL_COORDINATES in line:
-                system_lines = _consume_until(line_iter, END_END_FINAL_COORDINATES, exclude_end_marker=True)
+                system_lines = _consume_until(
+                    line_iter, END_END_FINAL_COORDINATES, exclude_end_marker=True
+                )
                 parsed.update(parse_system(system_lines))
 
     parsed[OUT_OCC_BLOCKS] = occs_blocks
@@ -392,7 +396,9 @@ def create_occs_mtx_dataframe(outputs: Dict, iter=-1):
     return pd.DataFrame(rows)
 
 
-def create_pair_distances_dataframe(system: ase.Atoms, rcut: float = 10.0, max_neighbours=6) -> pd.DataFrame:
+def create_pair_distances_dataframe(
+    system: ase.Atoms, rcut: float = 10.0, max_neighbours=6
+) -> pd.DataFrame:
     num_atoms = len(system)
     positions = system.positions
     cell_vecs = system.cell.array
