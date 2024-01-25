@@ -35,12 +35,19 @@ def get_similarity_groups(similarities: pd.DataFrame, tolerances: dict) -> nx.Gr
 def identify_duplicates(
     data: pd.DataFrame, similarities: pd.DataFrame, tolerances: dict
 ) -> pd.DataFrame:
+    if tolerances is None or len(tolerances) == 0:
+        raise ValueError("Must provide tolerances for similarity")
+
     deduplicated = data.copy()
 
     g = get_similarity_groups(similarities, tolerances)
     # Add all the nodes because those that aren't in a cluster won't appear in the graph otherwise
     # and our goal is to treat unique rows as a single-entry cluster
     g.add_nodes_from(data.index)
+
+    # Remove any nodes from the graph that aren't in the dataset
+    diff = set(g.nodes) - set(data.index)
+    g.remove_nodes_from(diff)
 
     total_removed = 0
     for dups in list(nx.connected_components(g)):

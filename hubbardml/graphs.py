@@ -1,9 +1,10 @@
 import abc
 import collections
 import functools
+import logging
 import operator
 import pathlib
-from typing import Iterable, Dict, List, Union, Tuple, Mapping, Any
+from typing import Iterable, Dict, List, Union, Tuple, Mapping, Any, Optional
 import uuid
 
 from e3nn import o3
@@ -21,6 +22,8 @@ from . import sites
 from . import utils
 
 __all__ = "ModelGraph", "UGraph", "VGraph", "HubbardDataset"
+
+_LOGGER = logging.getLogger(__name__)
 
 U = "U"
 V = "V"
@@ -163,19 +166,40 @@ class USite(Site):
 
 
 class ModelGraph(metaclass=abc.ABCMeta):
+    DEFAULT_GROUP_BY = None  # Subclasses can overwrite this to something that makes sense for them
+
     @abc.abstractmethod
     def create_inputs(self, raw_data, dtype=None, device=None) -> Dict:
         """Create the inputs for a model"""
 
-    # @abc.abstractmethod
+    @abc.abstractmethod
+    def prepare_dataset(self, dataset: pd.DataFrame) -> pd.DataFrame:
+        """Process and filter and the dataset to prepare it for use by this graph"""
+
     def get_similarity_frame(self, dataset: pd.DataFrame, group_by=None) -> pd.DataFrame:
         """Create a data frame containing similarities information"""
 
-    @abc.abstractmethod
     def identify_duplicates(
-        self, dataset: pd.DataFrame, group_by, tolerances: dict = None
+        self,
+        dataset: pd.DataFrame,
+        group_by: Optional[Iterable[str]],
+        tolerances: dict = None,
     ) -> pd.DataFrame:
         """Identify duplicate data in a dataset"""
+        if group_by is None:
+            group_by = self.DEFAULT_GROUP_BY
+
+        similarities_frame = self.get_similarity_frame(dataset, group_by=group_by)
+        return self.identify_duplicates_(dataset, similarities_frame, tolerances=tolerances)
+
+    @abc.abstractmethod
+    def identify_duplicates_(
+        self,
+        dataset: pd.DataFrame,
+        similarities_frame: pd.DataFrame,
+        tolerances: dict = None,
+    ) -> pd.DataFrame:
+        """Identify duplicate data in a dataset using the given similarities frame"""
 
 
 class UGraph(e3psi.graphs.OneSite, ModelGraph):
@@ -213,28 +237,39 @@ class UGraph(e3psi.graphs.OneSite, ModelGraph):
         return dict(site=site_tensor)
 
     def prepare_dataset(self, df: pd.DataFrame) -> pd.DataFrame:
-        # Remove non Hubbard active elements
-        df = df[df[keys.ATOM_1_ELEMENT].isin(self.species)]
-        df = df[df[keys.ATOM_2_ELEMENT].isin(self.species)]
-        # Remove rows that we can't deal with because they do not have the right electronic configuration
-        df = df[df[keys.ATOM_1_OCCS_1].apply(len) == 5]
-        df = df[df[keys.ATOM_2_OCCS_1].apply(len) == 5]
-
-        df[keys.SPECIES] = df.apply(
-            lambda row: frozenset([row[keys.ATOM_1_ELEMENT], row[keys.ATOM_2_ELEMENT]]), axis=1
-        )
-        df[keys.LABEL] = df[keys.ATOM_1_ELEMENT]
-        df[keys.COLOUR] = df[keys.ATOM_1_ELEMENT].map(plots.element_colours)
-
-        df = _prepare_dataset(df)
-
-        return datasets.filter_dataset(
+        # Do some initial filtering
+        df = datasets.filter_dataset(
             df,
             param_type=keys.PARAM_U,
             remove_vwd=True,
             remove_zero_out=True,
             remove_in_eq_out=False,
         )
+
+        # Remove non Hubbard active elements
+        df = df[df[keys.ATOM_1_ELEMENT].isin(self.species)]
+        df = df[df[keys.ATOM_2_ELEMENT].isin(self.species)]
+
+        # Remove rows that we can't deal with because they do not have the right electronic configuration
+        for col in (keys.ATOM_1_OCCS_1, keys.ATOM_1_OCCS_2, keys.ATOM_2_OCCS_1, keys.ATOM_2_OCCS_2):
+            occs_filter = df[col].apply(len) != 5  # 5x5 occupation matrices (for d-elements)
+            if sum(occs_filter) > 0:
+                _LOGGER.warning(
+                    "Found %n occupation matrices of the wrong shape in column %s.  Removing.",
+                    sum(occs_filter),
+                    col,
+                )
+                df = df[~occs_filter]
+
+        # Add additional useful columns
+        df[keys.SPECIES] = df.apply(
+            lambda row: frozenset([row[keys.ATOM_1_ELEMENT], row[keys.ATOM_2_ELEMENT]]), axis=1
+        )
+        df[keys.LABEL] = df[keys.ATOM_1_ELEMENT]
+        df[keys.COLOUR] = df[keys.ATOM_1_ELEMENT].map(plots.element_colours)
+        df = _prepare_dataset(df)
+
+        return df
 
     def get_similarity_frame(self, dataset: pd.DataFrame, group_by=DEFAULT_GROUP_BY):
         power_spectrum_attrs = ("occs_sum", "occs_prod")
@@ -302,10 +337,9 @@ class UGraph(e3psi.graphs.OneSite, ModelGraph):
 
         return pd.DataFrame(similarity_data)
 
-    def identify_duplicates(
-        self, dataset: pd.DataFrame, group_by=DEFAULT_GROUP_BY, tolerances=None
+    def identify_duplicates_(
+        self, dataset: pd.DataFrame, similarities_frame: pd.DataFrame, tolerances=None
     ) -> pd.DataFrame:
-        group_by = group_by or self.DEFAULT_GROUP_BY
         tolerances = tolerances if tolerances is not None else {}
         occs_tol = tolerances.get("occs_tol", self.OCCS_TOL)
         param_tol = tolerances.get("param_tol", self.PARAM_TOL)
@@ -315,7 +349,6 @@ class UGraph(e3psi.graphs.OneSite, ModelGraph):
             "occs_prod": occs_tol,
             similarities.SimilarityKeys.DELTA_PARAM_IN: param_tol,
         }
-        similarities_frame = self.get_similarity_frame(dataset, group_by=group_by)
         return similarities.identify_duplicates(dataset, similarities_frame, tolerances=tolerances)
 
 
@@ -404,8 +437,7 @@ class VGraph(e3psi.TwoSite, ModelGraph):
             edge=edge_tensor,
         )
 
-    @classmethod
-    def prepare_dataset(cls, dataframe: pd.DataFrame) -> pd.DataFrame:
+    def prepare_dataset(self, dataframe: pd.DataFrame) -> pd.DataFrame:
         dataframe = datasets.filter_dataset(
             dataframe,
             param_type=keys.PARAM_V,
@@ -424,22 +456,22 @@ class VGraph(e3psi.TwoSite, ModelGraph):
         dataframe[keys.SPECIES] = dataframe.apply(
             lambda row: frozenset([row[keys.ATOM_1_ELEMENT], row[keys.ATOM_2_ELEMENT]]), axis=1
         )
-        dataframe[cls.P_ELEMENT] = dataframe.apply(
+        dataframe[self.P_ELEMENT] = dataframe.apply(
             lambda row: row[keys.ATOM_1_ELEMENT]
             if row[keys.ATOM_1_OCCS_1].shape[0] == 3
             else row[keys.ATOM_2_ELEMENT],
             axis=1,
         )
-        dataframe[cls.D_ELEMENT] = dataframe.apply(
+        dataframe[self.D_ELEMENT] = dataframe.apply(
             lambda row: row[keys.ATOM_1_ELEMENT]
             if row[keys.ATOM_2_OCCS_1].shape[0] == 3
             else row[keys.ATOM_2_ELEMENT],
             axis=1,
         )
         dataframe[keys.LABEL] = dataframe.apply(
-            lambda row: f"{row[cls.D_ELEMENT]}-{row[cls.P_ELEMENT]}", axis=1
+            lambda row: f"{row[self.D_ELEMENT]}-{row[self.P_ELEMENT]}", axis=1
         )
-        dataframe[keys.COLOUR] = dataframe[cls.D_ELEMENT].map(plots.element_colours)
+        dataframe[keys.COLOUR] = dataframe[self.D_ELEMENT].map(plots.element_colours)
         dataframe = _prepare_dataset(dataframe)
 
         return dataframe
@@ -502,10 +534,9 @@ class VGraph(e3psi.TwoSite, ModelGraph):
 
         return pd.DataFrame(similarity_data)
 
-    def identify_duplicates(
-        self, dataset: pd.DataFrame, group_by=DEFAULT_GROUP_BY, tolerances=None
+    def identify_duplicates_(
+        self, dataset: pd.DataFrame, similarities_frame: pd.DataFrame, tolerances=None
     ) -> pd.DataFrame:
-        group_by = group_by or self.DEFAULT_GROUP_BY
         tolerances = tolerances or {}
         # Generate tolerances
         occs_tol = tolerances.get("occs_tol", self.OCCS_TOL)
@@ -520,7 +551,6 @@ class VGraph(e3psi.TwoSite, ModelGraph):
             "delta_dist": dist_tol,
             similarities.SimilarityKeys.DELTA_PARAM_IN: param_tol,
         }
-        similarities_frame = self.get_similarity_frame(dataset, group_by=group_by)
         return similarities.identify_duplicates(dataset, similarities_frame, tolerances=tolerances)
 
 

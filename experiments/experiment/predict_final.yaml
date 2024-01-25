@@ -9,3 +9,7 @@ prepare_data:
   group_by:
     - species
     - sc_paths
+
+
+train:
+  batch_size: 512

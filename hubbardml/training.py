@@ -1,4 +1,3 @@
-import abc
 import collections
 import contextlib
 import copy
@@ -8,6 +7,7 @@ import uuid
 
 import e3psi
 import mincepy
+import matplotlib.patches
 import pandas as pd
 import torch
 import torch.utils.data
@@ -427,6 +427,13 @@ def _do_train(
             axis_label=f"${param_type}$ value (eV)",
             title=f"Validate data, RMSE = {validate_rmse:.2f} eV",
         )
+        handles, _labels = fig.gca().get_legend_handles_labels()
+        handles.append(
+            matplotlib.patches.Patch(
+                color="none",
+            )
+        )
+
         fig.savefig(_plotfile_name(label, f"+{param_type}_parity_species"), bbox_inches="tight")
 
     return TrainingResult(model, df, trainer)

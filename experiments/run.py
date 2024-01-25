@@ -22,6 +22,8 @@ from hubbardml import models
 from hubbardml import plots
 from hubbardml import training
 
+import utils
+
 _LOGGER = logging.getLogger(__name__)
 
 TRAINER = "trainer.pth"
@@ -41,24 +43,13 @@ def checkpoint(trainer: training.Trainer, output_dir: pathlib.Path):
     torch.save(trainer.model, output_dir / MODEL)
 
 
-def init_data(
-    cfg: omegaconf.DictConfig, output_dir: pathlib.Path
-) -> Tuple[pd.DataFrame, graphs.ModelGraph]:
+def init_data(cfg: omegaconf.DictConfig) -> hubbardml.GraphData:
+    """Create the model graph and prepare the dataset for the training experiment"""
     # Create the graph that will be used to handle data preparation for the neural network
     graph = hydra.utils.instantiate(cfg["graph"])
 
     # Prepare the data
-    dataset = hydra.utils.instantiate(cfg["dataset"])
-    dataset = graph.prepare_dataset(dataset)
-    # Preprocess the data
-    if cfg.get("prepare_data") is not None:
-        dataset = hydra.utils.instantiate(cfg["prepare_data"])(
-            graph=graph,
-            dataset=dataset,
-            output_dir=output_dir,
-        )
-
-    return dataset, graph
+    return hubbardml.GraphData(graph, cfg["dataset"])
 
 
 @hydra.main(version_base="1.3", config_path=".", config_name="config")
@@ -72,12 +63,25 @@ def train(cfg: omegaconf.DictConfig) -> None:
         dtype = torch.from_numpy(np.zeros(0, np.dtype(cfg["dtype"]))).dtype
         torch.set_default_dtype(dtype)
 
-    dataset, graph = init_data(cfg, output_dir)
-    do_train(dataset, graph, cfg, output_dir)
+    # Data initialisation
+    graph_data = init_data(cfg)
+
+    # Turn the experiment data into an actual training dataset, with test/valid split
+    dataset = hydra.utils.instantiate(cfg["prepare_data"])(graph_data)
+
+    # Any initial analysis of the data before training
+    if cfg.get("analyse_data") is not None:
+        hydra.utils.instantiate(cfg["analyse_data"])(dataset, output_dir)
+
+    # Training
+    do_train(dataset, graph_data.graph, cfg, output_dir)
 
 
 def do_train(
-    dataset: pd.DataFrame, graph, cfg: omegaconf.DictConfig, output_dir: pathlib.Path
+    dataset: pd.DataFrame,
+    graph: graphs.ModelGraph,
+    cfg: omegaconf.DictConfig,
+    output_dir: pathlib.Path,
 ) -> training.Trainer:
     _LOGGER.info(
         "Data splits set:\n%s",
@@ -152,7 +156,7 @@ def do_train(
 
 def get_hubbard_datasets(
     dataset: pd.DataFrame,
-    graph: hubbardml.graphs.ModelGraph,
+    graph: graphs.ModelGraph,
     device: str = None,
     target_column: str = keys.PARAM_OUT,
 ) -> Tuple[graphs.HubbardDataset, graphs.HubbardDataset]:
@@ -224,15 +228,13 @@ def analyse(
                 continue
 
             subset = param_frame[param_frame[keys.TRAINING_LABEL] == training_label]
-            fraction = len(subset) / len(param_frame)
-            rmse = datasets.rmse(subset, training_label=training_label)
 
             # VALIDATE BY SPECIES
             parity_species_fig = plots.split_plot(
                 subset,
                 keys.LABEL,
                 axis_label=f"Hubbard ${param_type}$ (eV)",
-                title=f"{training_label} data ({fraction * 100:.0f}%), RMSE = {_to_mev_string(rmse)}",
+                title=f"{training_label}".capitalize(),
             )
             parity_species_fig.savefig(
                 _plot_path(f"parity_{training_label}_species"), bbox_inches="tight"

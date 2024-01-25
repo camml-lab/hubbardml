@@ -44,8 +44,6 @@ dev = [
     'pre-commit',
     'pytest',
 ]
-[project.scripts]
-hml = "hubbardml.cli:hml"
 [project.entry-points."mincepy.plugins.types"]
 "hubbardml" = "hubbardml.provides:get_mincepy_types"
 

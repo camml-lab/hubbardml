@@ -6,5 +6,9 @@ prepare_data:
   param_cutoff: ${hubbard_param_cutoff}
   uv_iter: 7
 
+analyse_data:
+  _target_: experiment.predict_from_first_iter.plot_baseline
+  _partial_: True
+
 train:
   max_epochs: 20_000

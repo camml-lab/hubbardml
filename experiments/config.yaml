@@ -9,9 +9,7 @@ defaults:
   - experiment: train
 
 # Dataset
-dataset:
-  _target_: hubbardml.datasets.load
-  filename: '../data/data_uv_2023_8_2.json'
+dataset: '../data/data_uv_2024_1_25.json'
 
 target_column: param_out
 

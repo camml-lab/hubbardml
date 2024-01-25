@@ -1,5 +1,6 @@
 defaults:
   - config
+  - _self_
 
 trainer:
   # Use high overfitting window as training curves for this experiment can be chaotic

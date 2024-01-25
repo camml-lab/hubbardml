@@ -12,6 +12,7 @@ from hydra.core import hydra_config
 import omegaconf
 import pandas as pd
 
+import hubbardml
 from hubbardml import datasets
 from hubbardml import keys
 from hubbardml import graphs
@@ -71,18 +72,12 @@ def get_results_frame(output_dir) -> pd.DataFrame:
         )
 
 
-def init_data(cfg: omegaconf.DictConfig) -> Tuple[pd.DataFrame, graphs.ModelGraph]:
+def init_data(cfg: omegaconf.DictConfig) -> hubbardml.GraphData:
     # Create the data handler that we'll be using to handle inputs
     graph: graphs.ModelGraph = hydra.utils.instantiate(cfg["graph"])
 
     # Prepare the data
-    dataset = hydra.utils.instantiate(cfg["dataset"])
-    dataset = graph.prepare_dataset(
-        dataset
-    )  # This sets the self-consistent paths, then we can prepare the occupations
-    dataset = prepare_occupations_data(dataset)
-
-    return dataset, graph
+    return hubbardml.GraphData(graph, cfg["dataset"])
 
 
 @hydra.main(version_base="1.3", config_path=".", config_name="olivines")
@@ -90,7 +85,13 @@ def train_olivines(cfg: omegaconf.DictConfig) -> None:
     output_dir = pathlib.Path(hydra_config.HydraConfig.get().runtime.output_dir)
     _LOGGER.info("Configuration (%s):\n%s", output_dir, omegaconf.OmegaConf.to_yaml(cfg))
 
-    data, graph = init_data(cfg)
+    graph_data = init_data(cfg)
+    data = graph_data.dataset
+    graph = graph_data.graph
+
+    # Prepare the occupations
+    data = prepare_occupations_data(data)
+
     data.to_json(output_dir / "dataset.json")
 
     results_frame = get_results_frame(output_dir)
@@ -98,7 +99,7 @@ def train_olivines(cfg: omegaconf.DictConfig) -> None:
         _LOGGER.info("Starting material: %s", material)
         # Get the data just for this material
         dataset = data[data[keys.DIR].str.contains(material)].copy()
-        dataset = graph.identify_duplicates(dataset, group_by=[Keys.OCCUPATION])
+        dataset = graph_data.identify_duplicates(dataset, group_by=[Keys.OCCUPATION])
 
         trainer = train_reference(dataset, graph, material, cfg, output_dir)
         ref_rmse = trainer.data_logger.as_dataframe().validate_rmse.min()

@@ -1,24 +1,23 @@
-import pathlib
 import logging
 
 import pandas as pd
 
+import hubbardml
 from hubbardml import datasets
-from hubbardml import graphs
 from hubbardml import keys
 
 _LOGGER = logging.getLogger(__name__)
 
 
 def prepare_data(
-    graph: graphs.ModelGraph,
-    dataset: pd.DataFrame,
-    output_dir: pathlib.Path,
+    graph_data: hubbardml.GraphData,
     param_cutoff: float,
     split_fraction: float,
     group_by=None,
     duplicate_tolerances: dict = None,  # None means 'use defaults'
 ) -> pd.DataFrame:
+    dataset = graph_data.dataset
+
     if param_cutoff is not None:
         # Filter out those that are below the parameter cutoff
         before = len(dataset)
@@ -32,9 +31,9 @@ def prepare_data(
         )
 
     if duplicate_tolerances != {}:
-        dataset = graph.identify_duplicates(
+        dataset = graph_data.identify_duplicates(
             dataset,
-            # group_by=group_by,
+            group_by=group_by,
             tolerances=duplicate_tolerances,
         )
 

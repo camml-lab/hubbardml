@@ -23,4 +23,4 @@ model:
   irrep_normalization: component
 
 train:
-  batch_size: 8 # As we have so little data, reducing the batch size helps to reduce overfitting significantly
+  batch_size: 64 # As we have so little data, reducing the batch size helps to reduce overfitting significantly

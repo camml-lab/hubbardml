@@ -14,4 +14,4 @@ prepare_data:
 
 train:
   batch_size: 1024
-  max_epochs: 30_000
+  max_epochs: 100

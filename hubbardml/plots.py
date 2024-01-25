@@ -70,7 +70,11 @@ def plot_series(ax, xdat, ydat, color, label, size=50):
     )
 
 
-def create_parity_plot(df: pd.DataFrame, axis_label=None, title=None) -> plt.Figure:
+def create_parity_plot(
+    df: pd.DataFrame,
+    axis_label: str = None,
+    title: str = None,
+) -> plt.Figure:
     """
     Create parity plot from validation and training label
 
@@ -79,7 +83,6 @@ def create_parity_plot(df: pd.DataFrame, axis_label=None, title=None) -> plt.Fig
     :param title: plot title
     :return: the matplotlib figure object
     """
-
     validate = df[df[keys.TRAINING_LABEL] == keys.VALIDATE]
     train = df[df[keys.TRAINING_LABEL] == keys.TRAIN]
 
@@ -208,6 +211,7 @@ def split_plot(
     axis_label: str = None,
     title: str = None,
     prediction_key: str = keys.PARAM_OUT_PREDICTED,
+    show_overall_rmse=True,
 ) -> plt.Figure:
     categories = df[category_key].unique()
     fig = plt.figure(figsize=(3.5, 3.5))
@@ -241,7 +245,17 @@ def split_plot(
     plt.xlim(ranges)
     plt.ylim(ranges)
 
-    plt.legend()
+    if show_overall_rmse:
+        handles, _labels = fig.gca().get_legend_handles_labels()
+        overall_rmse = datasets.rmse(df, prediction_key=prediction_key, training_label=None)
+        handles.append(
+            matplotlib.patches.Patch(
+                color="none", label=f"Overall {utils.to_mev_string(overall_rmse)}"
+            )
+        )
+        plt.legend(handles=handles)
+    else:
+        plt.legend()
 
     return fig
 

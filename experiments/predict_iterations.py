@@ -73,6 +73,7 @@ def train_iterations(cfg: omegaconf.DictConfig) -> None:
     for uv_iter in uv_iters:
         data = predict_from_first_iter.set_training_labels(data, uv_iter, include_subsequent=False)
 
+        # TODO: Update this to use GraphData
         # This will set the training label to DUPLICATE for all but one entry in each cluster of identical inputs
         dups = graph.identify_duplicates(
             data[data[keys.TRAINING_LABEL] == keys.VALIDATE],

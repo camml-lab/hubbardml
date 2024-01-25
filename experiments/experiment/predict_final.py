@@ -1,9 +1,13 @@
-import pathlib
+"""
+Experiment that tests predicting the final (self-consistent) value from any intermediate step in the self-consistent
+procedure.
+"""
+
 import logging
 
 import pandas as pd
 
-from hubbardml import graphs
+import hubbardml
 from hubbardml import datasets
 from hubbardml import keys
 
@@ -11,14 +15,14 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def prepare_data(
-    graph: graphs.ModelGraph,
-    dataset: pd.DataFrame,
-    output_dir: pathlib.Path,
+    graph_data: hubbardml.GraphData,
     param_cutoff: float,
     training_split: float,
     group_by=None,
     duplicate_tolerances=None,
 ) -> pd.DataFrame:
+    dataset = graph_data.dataset
+
     # Filter out anything smaller than the cutoff
     if param_cutoff is not None:
         # Filter out those that are below the parameter cutoff
@@ -35,8 +39,9 @@ def prepare_data(
     dataset = datasets.generate_converged_prediction_dataset(dataset)
 
     if duplicate_tolerances != {}:
-        dataset = graph.identify_duplicates(
-            dataset, group_by=group_by, tolerances=duplicate_tolerances
+        # De-duplicate
+        graph_data.identify_duplicates(
+            dataset, group_by=group_by, tolerances=duplicate_tolerances, inplace=True
         )
 
     # For now, just copy over the final parameter to be used as the label

@@ -3,8 +3,8 @@ import pathlib
 
 import pandas as pd
 
+import hubbardml
 from hubbardml import datasets
-from hubbardml import graphs
 from hubbardml import keys
 from hubbardml import plots
 
@@ -12,13 +12,13 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def prepare_data(
-    graph: graphs.ModelGraph,
-    dataset: pd.DataFrame,
-    output_dir: pathlib.Path,
+    graph_data: hubbardml.GraphData,
     param_cutoff: float,
     duplicate_tolerances: dict = None,  # None means 'use defaults'
     uv_iter: int = 2,
 ) -> pd.DataFrame:
+    dataset = graph_data.dataset
+
     if param_cutoff is not None:
         # Filter out those that are below the parameter cutoff
         before = len(dataset)
@@ -34,7 +34,7 @@ def prepare_data(
     dataset = set_training_labels(dataset, uv_iter=uv_iter, include_subsequent=False)
 
     # This will set the training label to DUPLICATE for all but one entry in each cluster of identical inputs
-    dups = graph.identify_duplicates(
+    dups = graph_data.identify_duplicates(
         dataset[dataset[keys.TRAINING_LABEL] == keys.VALIDATE],
         group_by=[keys.SPECIES, keys.SC_PATHS],
         tolerances=duplicate_tolerances,
@@ -43,9 +43,6 @@ def prepare_data(
     dataset.loc[
         dups[dups[keys.TRAINING_LABEL] == keys.DUPLICATE].index, keys.TRAINING_LABEL
     ] = keys.DUPLICATE
-
-    # Make a plot showing the baseline parity results
-    plot_baseline(dataset, output_dir)
 
     return dataset
 
@@ -93,6 +90,7 @@ def set_training_labels(
 
 
 def plot_baseline(dataset: pd.DataFrame, output_dir: pathlib.Path):
+    """Make a plot showing the baseline parity results"""
     dataset = dataset.copy()
 
     # Train only on the first iteration
