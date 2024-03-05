@@ -207,7 +207,7 @@ def generate_converged_prediction_dataset(df: pd.DataFrame, copy=True) -> pd.Dat
 
                 # Save the final Hubbard parameter value to the keys.PARAM_OUT_FILE column
                 out_df.loc[out_df.index.isin(rows.index), keys.PARAM_OUT_FINAL] = float(
-                    final_iter[keys.PARAM_OUT]
+                    final_iter[keys.PARAM_OUT].iloc[0]
                 )
 
     return out_df

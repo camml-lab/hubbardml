@@ -62,6 +62,7 @@ ATOM_SPECIES_1_HOT = "atom_sepcies_1_tensor"
 ATOM_SPECIES_2_HOT = "atom_sepcies_2_tensor"
 
 PARAM_OUT_PREDICTED = "param_out_predicted"
+PARAM_OUT_RELATIVE_ERROR = "param_out_relative_error"
 
 COLOUR = "colour"
 

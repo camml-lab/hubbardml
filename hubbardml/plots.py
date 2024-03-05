@@ -213,6 +213,7 @@ def split_plot(
     prediction_key: str = keys.PARAM_OUT_PREDICTED,
     show_overall_rmse=True,
 ) -> plt.Figure:
+    """Create a parity plot with separate series based on the category key"""
     categories = df[category_key].unique()
     fig = plt.figure(figsize=(3.5, 3.5))
     fig.suptitle(title)
@@ -308,5 +309,43 @@ def plot_training_curves(training_run: pd.DataFrame, logscale=True) -> plt.Figur
     if logscale:
         ax.set_xscale("log")
         ax.set_yscale("log")
+
+    return fig
+
+
+def plot_param_histogram(
+    df: pd.DataFrame,
+    x_label: str = "Hubbard param. (eV)",
+    y_label: str = "Frequency",
+    title: str = None,
+    param_col: str = keys.PARAM_OUT,
+    bins=20,
+) -> plt.Figure:
+    """Plot a histogram of the Hubbard parameter values, split by element"""
+    fig, ax = plt.subplots()
+    fig.suptitle(title)
+
+    kwargs = dict(
+        histtype="stepfilled",
+        alpha=0.8,
+        density=True,
+        bins=bins,
+        ec="k",
+        stacked=True,
+        # log=True,
+    )
+    for species, frame in df.groupby(keys.SPECIES):
+        ax.hist(
+            frame[param_col],
+            color=frame.iloc[0][keys.COLOUR],
+            label="-".join(species),
+            **kwargs,
+        )
+
+    if x_label:
+        ax.set_xlabel(x_label)
+    if y_label:
+        ax.set_ylabel(y_label)
+    fig.legend()
 
     return fig

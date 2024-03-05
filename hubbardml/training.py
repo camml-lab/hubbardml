@@ -28,7 +28,7 @@ TRAIN_OVERFITTING = "overfitting"
 TRAIN_STOP = "stop"
 
 DEFAULT_MAX_EPOCHS = 30_000
-DEFAULT_OVERFITTING_WINDOW = 400
+DEFAULT_OVERFITTING_WINDOW = 50
 DEFAULT_BATCH_SIZE = 4096
 
 
@@ -324,7 +324,7 @@ class Trainer(mincepy.SavableObject):
                     self._opt.step()
                     self._opt.zero_grad()
 
-                # Now do validation run
+                # Now do validation pass
                 self._model.eval()
                 with torch.no_grad():
                     self.validation.run(self._validate_loader)

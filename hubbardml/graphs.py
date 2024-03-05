@@ -20,6 +20,7 @@ from . import plots
 from . import similarities
 from . import sites
 from . import utils
+from . import qe
 
 __all__ = "ModelGraph", "UGraph", "VGraph", "HubbardDataset"
 
@@ -28,7 +29,7 @@ _LOGGER = logging.getLogger(__name__)
 U = "U"
 V = "V"
 
-DEFAULT_OCCS_TOL = 2e-4
+DEFAULT_OCCS_TOL = 1e-4
 DEFAULT_PARAM_TOL = 1e-3  # Input Hubbard parameters less than this are considered to be identical
 
 
@@ -123,20 +124,22 @@ class TensorElementwiseProduct(e3psi.Attr):
 class Site(sites.Site):
     """A site that carries information about the species and permutationally invariant occupations matrix tensors"""
 
-    def __init__(self, species: Iterable[str], occ_irreps: Union[str, o3.Irrep]) -> None:
+    def __init__(self, species: Iterable[str], occ_irrep: Union[str, o3.Irrep]) -> None:
         super().__init__()
         self.specie = e3psi.SpecieOneHot(species)
-        self._occs = e3psi.OccuMtx(occ_irreps)  # The occupations matrix representation
+        self._occ_irrep = o3.Irrep(occ_irrep)
+        self._occs = e3psi.OccuMtx(occ_irrep)  # The occupations matrix representation
         self.occs_sum = TensorSum(self._occs)
         self.occs_prod = TensorElementwiseProduct(self._occs)  # , filter_ir_out=["0e", "2e"])
 
     def create_inputs(self, tensors: Mapping, dtype=None, device=None) -> Dict:
         """Create a tensor from a dataframe row or dictionary"""
-        occupations = [tensors["occs1"], tensors["occs2"]]
+        # occupations = [tensors["occs1"], tensors["occs2"]]
+        occupations = [self.qe_to_e3(tensors["occs1"]), self.qe_to_e3(tensors["occs2"])]
 
         # We have to take the absolute value of the occupation matrices here because otherwise we won't
         # be globally invariant to spin flips
-        occupations = list(map(lambda occs: np.abs(np.array(occs)), occupations))
+        # occupations = list(map(lambda occs: np.abs(np.array(occs)), occupations))
 
         tensor_kwargs = dict(dtype=dtype, device=device)
         return dict(
@@ -145,6 +148,12 @@ class Site(sites.Site):
             occs_sum=e3psi.create_tensor(self.occs_sum, occupations, **tensor_kwargs),
             occs_prod=e3psi.create_tensor(self.occs_prod, occupations, **tensor_kwargs),
         )
+
+    def qe_to_e3(self, occu_mtx: torch.Tensor) -> torch.Tensor:
+        """Convert from QE to e3nn convention for spherical harmonics"""
+        occu_mtx = torch.tensor(occu_mtx, dtype=torch.get_default_dtype())
+        cob = qe.qe_to_e3_cob(self._occ_irrep.l)  # Get the change of basis matrix
+        return cob.T @ occu_mtx @ cob
 
 
 class USite(Site):
@@ -246,7 +255,7 @@ class UGraph(e3psi.graphs.OneSite, ModelGraph):
             remove_in_eq_out=False,
         )
 
-        # Remove non Hubbard active elements
+        # Remove non rows corresponding to unsupported species
         df = df[df[keys.ATOM_1_ELEMENT].isin(self.species)]
         df = df[df[keys.ATOM_2_ELEMENT].isin(self.species)]
 
@@ -437,44 +446,48 @@ class VGraph(e3psi.TwoSite, ModelGraph):
             edge=edge_tensor,
         )
 
-    def prepare_dataset(self, dataframe: pd.DataFrame) -> pd.DataFrame:
-        dataframe = datasets.filter_dataset(
-            dataframe,
+    def prepare_dataset(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = datasets.filter_dataset(
+            df,
             param_type=keys.PARAM_V,
             remove_vwd=True,
             remove_zero_out=False,
             remove_in_eq_out=False,
         )
+        # Remove non rows corresponding to unsupported species
+        df = df[df[keys.ATOM_1_ELEMENT].isin(self.species)]
+        df = df[df[keys.ATOM_2_ELEMENT].isin(self.species)]
+
         # Exclude all those that have P-P of D-D elements as this model can't deal with those
-        dataframe = dataframe[
-            ~dataframe.apply(
+        df = df[
+            ~df.apply(
                 lambda row: row[keys.ATOM_1_OCCS_1].shape[0] == row[keys.ATOM_2_OCCS_1].shape[0],
                 axis=1,
             )
         ]
 
-        dataframe[keys.SPECIES] = dataframe.apply(
+        df[keys.SPECIES] = df.apply(
             lambda row: frozenset([row[keys.ATOM_1_ELEMENT], row[keys.ATOM_2_ELEMENT]]), axis=1
         )
-        dataframe[self.P_ELEMENT] = dataframe.apply(
+        df[self.P_ELEMENT] = df.apply(
             lambda row: row[keys.ATOM_1_ELEMENT]
             if row[keys.ATOM_1_OCCS_1].shape[0] == 3
             else row[keys.ATOM_2_ELEMENT],
             axis=1,
         )
-        dataframe[self.D_ELEMENT] = dataframe.apply(
+        df[self.D_ELEMENT] = df.apply(
             lambda row: row[keys.ATOM_1_ELEMENT]
             if row[keys.ATOM_2_OCCS_1].shape[0] == 3
             else row[keys.ATOM_2_ELEMENT],
             axis=1,
         )
-        dataframe[keys.LABEL] = dataframe.apply(
+        df[keys.LABEL] = df.apply(
             lambda row: f"{row[self.D_ELEMENT]}-{row[self.P_ELEMENT]}", axis=1
         )
-        dataframe[keys.COLOUR] = dataframe[self.D_ELEMENT].map(plots.element_colours)
-        dataframe = _prepare_dataset(dataframe)
+        df[keys.COLOUR] = df[self.D_ELEMENT].map(plots.element_colours)
+        df = _prepare_dataset(df)
 
-        return dataframe
+        return df
 
     def get_similarity_frame(self, dataset: pd.DataFrame, group_by=DEFAULT_GROUP_BY):
         power_spectrum_attrs = ("occs_sum", "occs_prod")

@@ -1,6 +1,5 @@
 import functools
 import logging
-import math
 import pathlib
 from typing import Tuple, Union
 
@@ -70,6 +69,7 @@ def train(cfg: omegaconf.DictConfig) -> None:
     dataset = hydra.utils.instantiate(cfg["prepare_data"])(graph_data)
 
     # Any initial analysis of the data before training
+    utils.analyse_dataset(graph_data, output_dir)
     if cfg.get("analyse_data") is not None:
         hydra.utils.instantiate(cfg["analyse_data"])(dataset, output_dir)
 
@@ -236,9 +236,14 @@ def analyse(
                 axis_label=f"Hubbard ${param_type}$ (eV)",
                 title=f"{training_label}".capitalize(),
             )
+            parity_species_fig.gca().set_xlabel(f"Hubbard ${param_type}$ from DFPT (eV)")
             parity_species_fig.savefig(
                 _plot_path(f"parity_{training_label}_species"), bbox_inches="tight"
             )
+
+            plots.plot_param_histogram(
+                subset, param_col=keys.PARAM_OUT_RELATIVE_ERROR, x_label="Relative error"
+            ).savefig(_plot_path(f"relative_error_{training_label}"), bbox_inches="tight")
 
     # Iteration progression
     num_cols = 6
@@ -272,6 +277,12 @@ def infer(
 
     frame[keys.PARAM_OUT_PREDICTED] = (
         engines.evaluate(model, loader).detach().cpu().numpy().reshape(-1)
+    )
+    frame[keys.PARAM_DELTA] = frame.apply(
+        lambda row: row[keys.PARAM_OUT] - row[keys.PARAM_OUT_PREDICTED], axis=1
+    )
+    frame[keys.PARAM_OUT_RELATIVE_ERROR] = frame.apply(
+        lambda row: abs(row[keys.PARAM_DELTA] / row[keys.PARAM_OUT]), axis=1
     )
 
     return frame

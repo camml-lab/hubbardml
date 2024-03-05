@@ -8,12 +8,12 @@ feature_irreps: ${mul}x0e + ${mul}x1e + ${mul}x2e + ${mul}x3e
 
 species:
   - Ni
-  - Co
   - Mn
   - Fe
-  - Ti
+#  - Co  Not enough data for these elements, so just ignore them
+#  - Ti
+#  - S
   - O
-  - S
 
 graph:
   _target_: hubbardml.graphs.VGraph
