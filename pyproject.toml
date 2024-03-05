@@ -16,10 +16,10 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS :: MacOS X",
     "Programming Language :: Python",
-    'Programming Language :: Python :: 3.7',
     'Programming Language :: Python :: 3.8',
     'Programming Language :: Python :: 3.9',
     'Programming Language :: Python :: 3.10',
+    'Programming Language :: Python :: 3.11',
     "Topic :: Scientific/Engineering"
 ]
 keywords = ["machine learning", "equivariant", "electronic structure"]
@@ -40,6 +40,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     'black[d]',
+    "flake8",
     'flit',
     'pre-commit',
     'pytest',
@@ -49,7 +50,7 @@ dev = [
 
 [tool.black]
 line-length = 100
-target-version = ['py37', 'py38', 'py39', 'py310']
+target-version = ['py38', 'py39', 'py310', 'py311']
 include = '\.pyi?$'
 exclude = '''
 
