@@ -30,20 +30,21 @@ class GraphData:
     def dataset(self) -> pd.DataFrame:
         return self._dataset
 
-    def get_similarity_frame(self) -> pd.DataFrame:
+    def get_similarity_frame(self, group_by=None) -> pd.DataFrame:
         input_filename = pathlib.Path(self._data_path.name)
 
+        if group_by is None:
+            group_by = self._graph.DEFAULT_GROUP_BY
+
         # Create the filename to use for the cached similarities frame
-        cache_filename = (
-            "_".join(
-                [
-                    input_filename.stem,
-                    self.graph.__class__.__name__,
-                    "-".join(self._graph.DEFAULT_GROUP_BY),
-                ]
-            )
-            + ".json"
-        )
+        parts = [
+            input_filename.stem,
+            self.graph.__class__.__name__,
+        ]
+        if group_by:
+            parts.append("-".join(group_by))
+
+        cache_filename = "_".join(parts) + ".json"
 
         if pathlib.Path(cache_filename).exists():
             # Load the cached version
@@ -52,7 +53,7 @@ class GraphData:
         else:
             # Create the cached version
             _LOGGER.info("Creating similarities frame %s", cache_filename)
-            similarities_frame = self._graph.get_similarity_frame(self._dataset)
+            similarities_frame = self._graph.get_similarity_frame(self._dataset, group_by=group_by)
             _LOGGER.info("Saving cached similarities frame to %s", cache_filename)
             similarities_frame.to_json(cache_filename)
 
@@ -73,7 +74,7 @@ class GraphData:
         if not inplace:
             dataset = dataset.copy()
 
-        similarity_frame = self.get_similarity_frame()
+        similarity_frame = self.get_similarity_frame(group_by=group_by)
 
         kwargs = {}
         if tolerances is not None:

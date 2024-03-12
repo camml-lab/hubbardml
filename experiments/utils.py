@@ -28,16 +28,16 @@ def analyse_dataset(graph_data: hubbardml.GraphData, output_dir: pathlib.Path) -
     plt.close(fig)
 
     # Analyse similarities
-    _LOGGER.info("Analysing similarities frame")
-    similarities = graph_data.get_similarity_frame()
-    for key in ("occs_sum", "occs_prod"):
-        ax = similarities[key].hist(bins=BINS, log=False)
-        ax.axvline(hubbardml.graphs.DEFAULT_OCCS_TOL)
-        ax.set_xlim(left=0.0)
-        fig = ax.get_figure()
-        fig.set_size_inches(16, 2)
-        fig.savefig(output_dir / f"{key}_similarity.pdf", bbox_inches="tight")
-        plt.close(fig)
+    # _LOGGER.info("Analysing similarities frame")
+    # similarities = graph_data.get_similarity_frame()
+    # for key in ("occs_sum", "occs_prod"):
+    #     ax = similarities[key].hist(bins=BINS, log=False)
+    #     ax.axvline(hubbardml.graphs.DEFAULT_OCCS_TOL)
+    #     ax.set_xlim(left=0.0)
+    #     fig = ax.get_figure()
+    #     fig.set_size_inches(16, 2)
+    #     fig.savefig(output_dir / f"{key}_similarity.pdf", bbox_inches="tight")
+    #     plt.close(fig)
 
     # Plot histogram of the Hubbard values
     _LOGGER.info("Analysing parameter distributions")

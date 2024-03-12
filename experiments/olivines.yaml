@@ -4,11 +4,11 @@ defaults:
 
 trainer:
   # Use high overfitting window as training curves for this experiment can be chaotic
-  overfitting_window: 2000
+  overfitting_window: 100
 
 train:
-  max_epochs: 12_000
-  batch_size: 16
+  max_epochs: 6_000
+  batch_size: 8
 
 
 hydra:

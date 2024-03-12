@@ -10,6 +10,8 @@ defaults:
 
 # Dataset
 dataset: '../data/data_uv_2024_1_25.json'
+# dataset: '../data/data_uv_2023_8_2.json'
+
 
 target_column: param_out
 
@@ -37,7 +39,7 @@ trainer:
 
 train:
   min_epochs: 0
-  max_epochs: 12_000
+  max_epochs: 10_000
   batch_size: 64
 
 

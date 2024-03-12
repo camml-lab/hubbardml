@@ -10,8 +10,3 @@ prepare_data:
   group_by:
     - species
     - sc_paths
-  duplicate_tolerances: null
-
-train:
-  batch_size: 1024
-  max_epochs: 100

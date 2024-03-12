@@ -7,10 +7,11 @@ feature_irreps: ${mul}x0e + ${mul}x1e + ${mul}x2e + ${mul}x3e
 
 trainer:
   # Use high overfitting window as training curves for this experiment can be chaotic
-  overfitting_window: 2000
+  overfitting_window: 200
 
 train:
-  max_epochs: 12_000
+  min_epochs: 1_000
+  max_epochs: 6_000
   batch_size: 64
 
 

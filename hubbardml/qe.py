@@ -16,6 +16,7 @@ as the reference to which everything is transformed, and then we can transform f
 
 import torch
 from e3nn import o3
+import e3psi
 
 
 # E3NN change of basis functions
@@ -72,3 +73,20 @@ def qe_to_e3_cob(l: int) -> torch.Tensor:  # noqa: E741
 
 def qe_to_e3(l: int, ylm: torch.Tensor) -> torch.Tensor:  # noqa: E741
     return ylm @ qe_to_e3_cob(l)
+
+
+class QeOccuMtx(e3psi.OccuMtx):
+    def __init__(self, orbital_irrep) -> None:
+        super().__init__(orbital_irrep)
+        self._occ_irrep = o3.Irrep(orbital_irrep)
+
+    def create_tensor(self, occ_mtx, dtype=None, device=None) -> torch.Tensor:
+        dtype = dtype or torch.get_default_dtype()
+
+        # First perform the change of basis from QE to e3nn
+        cob = qe_to_e3_cob(self._occ_irrep.l).to(
+            dtype=dtype, device=device
+        )  # Get the change of basis matrix
+        occ_mtx = cob.T @ torch.tensor(occ_mtx, device=device, dtype=dtype) @ cob
+        # Now, create the spherical tensor
+        return super().create_tensor(occ_mtx, dtype, device)

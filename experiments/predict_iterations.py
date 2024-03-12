@@ -45,25 +45,14 @@ def get_results_frame(output_dir) -> pd.DataFrame:
         )
 
 
-def init_data(cfg: omegaconf.DictConfig) -> Tuple[pd.DataFrame, graphs.ModelGraph]:
-    # Create the data handler that we'll be using to handle inputs
-    graph: graphs.ModelGraph = hydra.utils.instantiate(cfg["graph"])
-
-    # Prepare the data
-    dataset = hydra.utils.instantiate(cfg["dataset"])
-    dataset = graph.prepare_dataset(
-        dataset
-    )  # This sets the self-consistent paths, then we can prepare the occupations
-
-    return dataset, graph
-
-
 @hydra.main(version_base="1.3", config_path=".", config_name="predict_iterations")
 def train_iterations(cfg: omegaconf.DictConfig) -> None:
     output_dir = pathlib.Path(hydra_config.HydraConfig.get().runtime.output_dir)
     _LOGGER.info("Configuration (%s):\n%s", output_dir, omegaconf.OmegaConf.to_yaml(cfg))
 
-    data, graph = init_data(cfg)
+    graph_data = run.init_data(cfg)
+    graph = graph_data.graph
+    data = graph_data.dataset
     data.to_json(output_dir / "dataset.json")
 
     # Get the iteration numbers that we want to perform experiments on
@@ -73,7 +62,6 @@ def train_iterations(cfg: omegaconf.DictConfig) -> None:
     for uv_iter in uv_iters:
         data = predict_from_first_iter.set_training_labels(data, uv_iter, include_subsequent=False)
 
-        # TODO: Update this to use GraphData
         # This will set the training label to DUPLICATE for all but one entry in each cluster of identical inputs
         dups = graph.identify_duplicates(
             data[data[keys.TRAINING_LABEL] == keys.VALIDATE],

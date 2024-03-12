@@ -128,18 +128,21 @@ class Site(sites.Site):
         super().__init__()
         self.specie = e3psi.SpecieOneHot(species)
         self._occ_irrep = o3.Irrep(occ_irrep)
-        self._occs = e3psi.OccuMtx(occ_irrep)  # The occupations matrix representation
+        self._occs = qe.QeOccuMtx(occ_irrep)  # The occupations matrix representation
+        # self._occs = e3psi.OccuMtx(occ_irrep)  # The occupations matrix representation
+
         self.occs_sum = TensorSum(self._occs)
         self.occs_prod = TensorElementwiseProduct(self._occs)  # , filter_ir_out=["0e", "2e"])
 
     def create_inputs(self, tensors: Mapping, dtype=None, device=None) -> Dict:
         """Create a tensor from a dataframe row or dictionary"""
-        # occupations = [tensors["occs1"], tensors["occs2"]]
-        occupations = [self.qe_to_e3(tensors["occs1"]), self.qe_to_e3(tensors["occs2"])]
+        occupations = [tensors["occs1"], tensors["occs2"]]
 
         # We have to take the absolute value of the occupation matrices here because otherwise we won't
         # be globally invariant to spin flips
         # occupations = list(map(lambda occs: np.abs(np.array(occs)), occupations))
+
+        # occupations = [self.qe_to_e3(tensors["occs1"]), self.qe_to_e3(tensors["occs2"])]
 
         tensor_kwargs = dict(dtype=dtype, device=device)
         return dict(
@@ -154,6 +157,7 @@ class Site(sites.Site):
         occu_mtx = torch.tensor(occu_mtx, dtype=torch.get_default_dtype())
         cob = qe.qe_to_e3_cob(self._occ_irrep.l)  # Get the change of basis matrix
         return cob.T @ occu_mtx @ cob
+        # return cob @ occu_mtx @ cob.T
 
 
 class USite(Site):
@@ -184,6 +188,9 @@ class ModelGraph(metaclass=abc.ABCMeta):
     @abc.abstractmethod
     def prepare_dataset(self, dataset: pd.DataFrame) -> pd.DataFrame:
         """Process and filter and the dataset to prepare it for use by this graph"""
+
+    def calculate_duplicates_data(self, dataset: pd.DataFrame):
+        """Create data needed to identify duplicates"""
 
     def get_similarity_frame(self, dataset: pd.DataFrame, group_by=None) -> pd.DataFrame:
         """Create a data frame containing similarities information"""
@@ -280,71 +287,83 @@ class UGraph(e3psi.graphs.OneSite, ModelGraph):
 
         return df
 
+    def calculate_duplicates_data(self, dataset: pd.DataFrame):
+        """Create data needed to identify duplicates"""
+        power_spectrum_attrs = ("occs_sum", "occs_prod")
+        dataset = _prepare_dataset(dataset)
+
+        with torch.no_grad():
+            # Create the power spectrum operations that we will use for calculating similarity
+            inputs = dataset.apply(
+                lambda row: self.site.create_inputs(
+                    dict(
+                        specie=row[keys.ATOM_1_ELEMENT],
+                        u_in=row[keys.PARAM_IN],
+                        **datasets.get_occupation_matrices(row, 1),
+                    )
+                ),
+                axis=1,
+                result_type="reduce",
+            )
+            attrs = e3psi.tensorial_attrs(self.site)
+            for attr_name in power_spectrum_attrs:
+                # Get the attribute and create the power spectrum operation for it
+                attr = attrs[attr_name]
+                dist_ps = e3psi.distances.PowerSpectrumDistance(e3psi.irreps(attr))
+
+                ps_key = key(attr_name, 1)
+
+                # Calculate The power spectra
+                dataset[ps_key] = inputs.apply(
+                    lambda row: dist_ps.power_spectrum(row[attr_name]).numpy()
+                )
+
+        return dataset
+
     def get_similarity_frame(self, dataset: pd.DataFrame, group_by=DEFAULT_GROUP_BY):
         power_spectrum_attrs = ("occs_sum", "occs_prod")
-        dataset = _prepare_dataset(dataset.copy())
+        dataset = _prepare_dataset(dataset)
 
-        # Create the power spectrum operations that we will use for calculating similarity
-        inputs = dataset.apply(
-            lambda row: self.site.create_inputs(
-                dict(
-                    specie=row[keys.ATOM_1_ELEMENT],
-                    u_in=row[keys.PARAM_IN],
-                    **datasets.get_occupation_matrices(row, 1),
-                )
-            ),
-            axis=1,
-            result_type="reduce",
-        )
-        attrs = e3psi.tensorial_attrs(self.site)
-        power_spectra = {}
-        for attr_name in power_spectrum_attrs:
-            # Get the attribute and create the power spectrum operation for it
-            attr = attrs[attr_name]
-            dist_ps = e3psi.distances.PowerSpectrumDistance(e3psi.irreps(attr))
+        with torch.no_grad():
+            dataset = self.calculate_duplicates_data(dataset)
+            similarity_data = collections.defaultdict(list)
 
-            # Calculate The power spectra
-            power_spectra[attr_name] = inputs.apply(
-                lambda row: dist_ps.power_spectrum(row[attr_name])
-            )
-        power_spectra = pd.DataFrame(power_spectra)
-        similarity_data = collections.defaultdict(list)
+            for _name, indexes in dataset.groupby(list(group_by)).groups.items():
+                for i, idx_i in enumerate(indexes):
+                    row_i = dataset.loc[idx_i]
 
-        for _name, indexes in dataset.groupby(list(group_by)).groups.items():
-            for i, idx_i in enumerate(indexes):
-                row_i = dataset.loc[idx_i]
-                ps_i = power_spectra.loc[idx_i]
+                    for _j, idx_j in enumerate(indexes[i + 1 :]):
+                        row_j = dataset.loc[idx_j]
 
-                for j_, idx_j in enumerate(indexes[i + 1 :]):
-                    row_j = dataset.loc[idx_j]
-                    ps_j = power_spectra.loc[idx_j]
-
-                    similarity_data[similarities.SimilarityKeys.INDEX_PAIR].append({idx_i, idx_j})
-
-                    # Calculate the difference between power spectra
-                    for attr_name in power_spectrum_attrs:
-                        similarity_data[attr_name].append(
-                            utils.rmse(ps_i[attr_name], ps_j[attr_name]).cpu().item()
+                        similarity_data[similarities.SimilarityKeys.INDEX_PAIR].append(
+                            {idx_i, idx_j}
                         )
 
-                    dist_trace = abs(
-                        (
-                            diag_mean(row_i[keys.ATOM_1_OCCS_1])
-                            + diag_mean(row_i[keys.ATOM_1_OCCS_2])
-                        )
-                        - (
-                            diag_mean(row_j[keys.ATOM_1_OCCS_1])
-                            + diag_mean(row_j[keys.ATOM_1_OCCS_2])
-                        )
-                    )
-                    similarity_data[similarities.SimilarityKeys.DIST_TRACE].append(dist_trace)
+                        # Calculate the difference between power spectra
+                        for attr_name in power_spectrum_attrs:
+                            ps_key = key(attr_name, 1)
+                            similarity_data[attr_name].append(
+                                utils.rmse(row_i[ps_key], row_j[ps_key])
+                            )
 
-                    # Difference in input parameter values
-                    similarity_data[similarities.SimilarityKeys.DELTA_PARAM_IN].append(
-                        abs(row_i[keys.PARAM_IN] - row_j[keys.PARAM_IN])
-                    )
+                        dist_trace = abs(
+                            (
+                                diag_mean(row_i[keys.ATOM_1_OCCS_1])
+                                + diag_mean(row_i[keys.ATOM_1_OCCS_2])
+                            )
+                            - (
+                                diag_mean(row_j[keys.ATOM_1_OCCS_1])
+                                + diag_mean(row_j[keys.ATOM_1_OCCS_2])
+                            )
+                        )
+                        similarity_data[similarities.SimilarityKeys.DIST_TRACE].append(dist_trace)
 
-        return pd.DataFrame(similarity_data)
+                        # Difference in input parameter values
+                        similarity_data[similarities.SimilarityKeys.DELTA_PARAM_IN].append(
+                            abs(row_i[keys.PARAM_IN] - row_j[keys.PARAM_IN])
+                        )
+
+            return pd.DataFrame(similarity_data)
 
     def identify_duplicates_(
         self, dataset: pd.DataFrame, similarities_frame: pd.DataFrame, tolerances=None
@@ -470,15 +489,19 @@ class VGraph(e3psi.TwoSite, ModelGraph):
             lambda row: frozenset([row[keys.ATOM_1_ELEMENT], row[keys.ATOM_2_ELEMENT]]), axis=1
         )
         df[self.P_ELEMENT] = df.apply(
-            lambda row: row[keys.ATOM_1_ELEMENT]
-            if row[keys.ATOM_1_OCCS_1].shape[0] == 3
-            else row[keys.ATOM_2_ELEMENT],
+            lambda row: (
+                row[keys.ATOM_1_ELEMENT]
+                if row[keys.ATOM_1_OCCS_1].shape[0] == 3
+                else row[keys.ATOM_2_ELEMENT]
+            ),
             axis=1,
         )
         df[self.D_ELEMENT] = df.apply(
-            lambda row: row[keys.ATOM_1_ELEMENT]
-            if row[keys.ATOM_2_OCCS_1].shape[0] == 3
-            else row[keys.ATOM_2_ELEMENT],
+            lambda row: (
+                row[keys.ATOM_1_ELEMENT]
+                if row[keys.ATOM_2_OCCS_1].shape[0] == 3
+                else row[keys.ATOM_2_ELEMENT]
+            ),
             axis=1,
         )
         df[keys.LABEL] = df.apply(
@@ -489,63 +512,85 @@ class VGraph(e3psi.TwoSite, ModelGraph):
 
         return df
 
-    def get_similarity_frame(self, dataset: pd.DataFrame, group_by=DEFAULT_GROUP_BY):
-        power_spectrum_attrs = ("occs_sum", "occs_prod")
-        dataset = _prepare_dataset(dataset.copy())
+    def calculate_duplicates_data(self, dataset: pd.DataFrame):
+        """Create data needed to identify duplicates"""
+        _LOGGER.info("Calculating duplicates data")
+        with torch.no_grad():
+            power_spectrum_attrs = ("occs_sum", "occs_prod")
+            dataset = _prepare_dataset(dataset)
 
-        def tmp_input_creator(row: Mapping, site_idx: int):
-            site_name = f"site{site_idx}"
-            site: Site = getattr(self, site_name)
-            atom_idx = self.get_pd_idx(row)[site_idx - 1]
-            return site.create_inputs(
-                dict(
-                    specie=row[key("element", atom_idx)],
-                    **datasets.get_occupation_matrices(row, atom_idx),
+            def tmp_input_creator(row: Mapping, site_idx: int):
+                site_name = f"site{site_idx}"
+                site: Site = getattr(self, site_name)
+                atom_idx = self.get_pd_idx(row)[site_idx - 1]
+                return site.create_inputs(
+                    dict(
+                        specie=row[key("element", atom_idx)],
+                        **datasets.get_occupation_matrices(row, atom_idx),
+                    )
                 )
-            )
 
-        for site_idx in (1, 2):
-            inputs = dataset.apply(
-                lambda row: tmp_input_creator(row, site_idx), axis=1, result_type="reduce"
-            )
+            _LOGGER.info("Creating power spectra for %i input tensors", len(dataset))
+            for site_idx in (1, 2):
+                _LOGGER.info("Starting site %i", site_idx)
+                inputs = dataset.apply(
+                    lambda row: tmp_input_creator(row, site_idx), axis=1, result_type="reduce"
+                )
 
-            site = getattr(self, f"site{site_idx}")
-            for attr_name in power_spectrum_attrs:
-                # Create the power spectrum operations that we will use for calculating similarity
-                attr = e3psi.tensorial_attrs(site)[attr_name]
-                calc_ps = e3psi.distances.PowerSpectrumDistance(e3psi.irreps(attr))
+                site = getattr(self, f"site{site_idx}")
+                for attr_name in power_spectrum_attrs:
+                    _LOGGER.info("Getting power spectra for %s", attr_name)
+                    # Create the power spectrum operations that we will use for calculating similarity
+                    attr = e3psi.tensorial_attrs(site)[attr_name]
+                    calc_ps = e3psi.distances.PowerSpectrumDistance(e3psi.irreps(attr))
 
-                ps_key = key(attr_name, site_idx)
-                dataset[ps_key] = inputs.apply(lambda row: calc_ps.power_spectrum(row[attr_name]))
+                    ps_key = key(attr_name, site_idx)
+                    # dataset[ps_key] = inputs[attr_name].apply(calc_ps.power_spectrum)
 
-        similarity_data = collections.defaultdict(list)
-
-        for _name, indexes in dataset.groupby(list(group_by)).groups.items():
-            for i, idx_i in enumerate(indexes):
-                row_i = dataset.loc[idx_i]
-
-                for j_, idx_j in enumerate(indexes[i + 1 :]):
-                    row_j = dataset.loc[idx_j]
-                    similarity_data[similarities.SimilarityKeys.INDEX_PAIR].append({idx_i, idx_j})
-
-                    # Calculate the difference between power spectra
-                    for site_idx in (1, 2):
-                        for attr_name in power_spectrum_attrs:
-                            ps_key = key(attr_name, site_idx)
-                            ps_i = row_i[ps_key]
-                            ps_j = row_j[ps_key]
-                            similarity_data[ps_key].append(utils.rmse(ps_i, ps_j).cpu().item())
-
-                    # Difference in input parameter values
-                    similarity_data[similarities.SimilarityKeys.DELTA_PARAM_IN].append(
-                        abs(row_i[keys.PARAM_IN] - row_j[keys.PARAM_IN])
+                    dataset[ps_key] = inputs.apply(
+                        lambda row: calc_ps.power_spectrum(row[attr_name])
                     )
+                _LOGGER.info("Finished site %i", site_idx)
 
-                    similarity_data["delta_dist"].append(
-                        abs(row_i[keys.DIST_IN] - row_j[keys.DIST_IN])
-                    )
+        return dataset
 
-        return pd.DataFrame(similarity_data)
+    def get_similarity_frame(self, dataset: pd.DataFrame, group_by=DEFAULT_GROUP_BY):
+        _LOGGER.info("Creating similarity frame grouped by: %s", group_by)
+        with torch.no_grad():
+            power_spectrum_attrs = ("occs_sum", "occs_prod")
+            dataset = self.calculate_duplicates_data(dataset)
+
+            _LOGGER.info("Comparing power spectra")
+            similarity_data = collections.defaultdict(list)
+            for _name, indexes in dataset.groupby(list(group_by)).groups.items():
+                _LOGGER.info("Comparing %i groups", len())
+                for i, idx_i in enumerate(indexes):
+                    row_i = dataset.loc[idx_i]
+
+                    for _j, idx_j in enumerate(indexes[i + 1 :]):
+                        row_j = dataset.loc[idx_j]
+                        similarity_data[similarities.SimilarityKeys.INDEX_PAIR].append(
+                            {idx_i, idx_j}
+                        )
+
+                        # Calculate the difference between power spectra
+                        for site_idx in (1, 2):
+                            for attr_name in power_spectrum_attrs:
+                                ps_key = key(attr_name, site_idx)
+                                ps_i = row_i[ps_key]
+                                ps_j = row_j[ps_key]
+                                similarity_data[ps_key].append(utils.rmse(ps_i, ps_j))
+
+                        # Difference in input parameter values
+                        similarity_data[similarities.SimilarityKeys.DELTA_PARAM_IN].append(
+                            abs(row_i[keys.PARAM_IN] - row_j[keys.PARAM_IN])
+                        )
+
+                        similarity_data["delta_dist"].append(
+                            abs(row_i[keys.DIST_IN] - row_j[keys.DIST_IN])
+                        )
+
+            return pd.DataFrame(similarity_data)
 
     def identify_duplicates_(
         self, dataset: pd.DataFrame, similarities_frame: pd.DataFrame, tolerances=None

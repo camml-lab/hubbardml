@@ -2,6 +2,7 @@ import json
 import pathlib
 import random
 from typing import List, Union, Tuple, Set, Iterator, Mapping, Dict, Optional
+import os
 
 import ase.data
 import numpy as np

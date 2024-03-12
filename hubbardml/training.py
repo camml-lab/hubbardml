@@ -64,7 +64,7 @@ def train_model(
         df,
         create_plots=create_plots,
         label=label,
-        min_iters=5000,
+        min_epochs=5000,
         max_epochs=max_epochs,
     )
 
@@ -377,7 +377,7 @@ def _do_train(
     df: pd.DataFrame,
     create_plots: bool,
     label: str,
-    min_iters=None,
+    min_epochs=None,
     max_epochs=DEFAULT_MAX_EPOCHS,
 ):
     if param_type not in ("U", "V"):
@@ -393,7 +393,7 @@ def _do_train(
     )
 
     # Train the model
-    trainer.train(callback=print, callback_period=50, min_epochs=min_iters, max_epochs=max_epochs)
+    trainer.train(callback=print, callback_period=50, min_epochs=min_epochs, max_epochs=max_epochs)
 
     # Set the predicted values in the dataframe
     val_predictions = (
