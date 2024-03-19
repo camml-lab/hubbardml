@@ -1,5 +1,6 @@
 import logging
 import random
+from typing import Iterator, Tuple
 
 import numpy as np
 import numpy.random
@@ -25,6 +26,13 @@ def _count():
     while True:
         yield i
         i += 1
+
+
+def linear_index_pair(total: int) -> Iterator[Tuple[int, int]]:
+    """Yield a sequence of index pairs in the order used by scipy.distance.pdist"""
+    for i in range(total):
+        for j in range(i + 1, total):
+            yield i, j
 
 
 def calculate_u_energy(hubbard_u: float, occs: np.ndarray) -> float:
