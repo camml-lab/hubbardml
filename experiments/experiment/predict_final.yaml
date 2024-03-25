@@ -8,4 +8,4 @@ prepare_data:
   training_split: 0.2
   group_by:
     - species
-    - sc_paths
+#    - sc_paths

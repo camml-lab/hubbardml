@@ -27,7 +27,7 @@ def prepare_data(
     if param_cutoff is not None:
         # Filter out those that are below the parameter cutoff
         before = len(dataset)
-        dataset = dataset[dataset[keys.PARAM_OUT] > param_cutoff]
+        dataset.drop(dataset.index[dataset[keys.PARAM_OUT] <= param_cutoff], inplace=True)
         _LOGGER.info(
             "Removed entries with %s less then %f: before - %i after %i",
             keys.PARAM_OUT,
@@ -36,13 +36,14 @@ def prepare_data(
             len(dataset),
         )
 
-    dataset = datasets.generate_converged_prediction_dataset(dataset)
+    dataset = datasets.generate_converged_prediction_dataset(dataset, copy=False)
 
     if duplicate_tolerances != {}:
         # De-duplicate
-        graph_data.identify_duplicates(
-            dataset, group_by=group_by, tolerances=duplicate_tolerances, inplace=True
-        )
+        graph_data._dataset = dataset
+        _LOGGER.debug("Identifying duplicates grouped by: %s", group_by)
+        graph_data.identify_duplicates(dataset, group_by=group_by, tolerances=duplicate_tolerances)
+        _LOGGER.debug("Dataset size: %i", len(dataset))
 
     # For now, just copy over the final parameter to be used as the label
     dataset[keys.PARAM_OUT] = dataset[keys.PARAM_OUT_FINAL]

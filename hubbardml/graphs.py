@@ -334,8 +334,12 @@ class UGraph(e3psi.graphs.OneSite, ModelGraph):
 
         dataset = self.calculate_duplicates_data(dataset)
 
+        if group_by:
+            iter = dataset.groupby(list(group_by))
+        else:
+            iter = ((None, dataset),).__iter__()
         sim_data = collections.defaultdict(list)
-        for _name, group in dataset.groupby(list(group_by)):
+        for _name, group in iter:
             row_ijs = np.fromiter(utils.linear_index_pair(len(group)), dtype=((int, 2)))
             # These contain the index value for each pair of rows (in the same order as returned by pdist)
             indexes = [set(entry) for entry in group.index.to_numpy()[row_ijs]]
@@ -565,7 +569,11 @@ class VGraph(e3psi.TwoSite, ModelGraph):
 
         _LOGGER.info("Comparing power spectra")
         sim_data = collections.defaultdict(list)
-        for _name, group in dataset.groupby(list(group_by)):
+        if group_by:
+            iter = dataset.groupby(list(group_by))
+        else:
+            iter = ((None, dataset),)
+        for _name, group in iter:
             _LOGGER.info("Comparing %i entries", len(group))
 
             row_ijs = np.fromiter(utils.linear_index_pair(len(group)), dtype=((int, 2)))
@@ -589,7 +597,7 @@ class VGraph(e3psi.TwoSite, ModelGraph):
                     ps_key = key(attr_name, site_idx)
                     array = np.vstack(group[ps_key].to_numpy())
                     dists = np.sqrt(distance.pdist(array, "sqeuclidean") / len(array[0]))
-                    sim_data[attr_name].extend(dists)
+                    sim_data[ps_key].extend(dists)
 
         return pd.DataFrame(sim_data)
 
