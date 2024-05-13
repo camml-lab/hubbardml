@@ -99,7 +99,7 @@ def train_olivines(cfg: omegaconf.DictConfig) -> None:
         _LOGGER.info("Starting material: %s", material)
         # Get the data just for this material
         dataset = data[data[keys.DIR].str.contains(material)].copy()
-        dataset = graph_data.identify_duplicates(dataset, group_by=[Keys.OCCUPATION])
+        dataset = graph.identify_duplicates(dataset, group_by=[Keys.OCCUPATION])
 
         trainer = train_reference(dataset, graph, material, cfg, output_dir)
         ref_rmse = trainer.data_logger.as_dataframe().validate_rmse.min()

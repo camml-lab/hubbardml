@@ -26,12 +26,12 @@ import e3psi
 change_of_basis = torch.tensor([[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
 
 
-def e3_to_standard_cob(l: int):  # noqa: E741
-    return o3.Irrep(l, (-1) ** l).D_from_matrix(change_of_basis)
+def e3_to_standard_cob(l: int, dtype=None):  # noqa: E741
+    return o3.Irrep(l, (-1) ** l).D_from_matrix(change_of_basis.to(dtype=dtype))
 
 
 def e3_to_standard(l: int, ylm):  # noqa: E741
-    cob = e3_to_standard_cob(l)
+    cob = e3_to_standard_cob(l, dtype=ylm.dtype)
     return ylm @ cob
 
 
@@ -46,33 +46,35 @@ def qe_to_standard_m(l: int):  # noqa: E741
         yield -m
 
 
-def qe_to_standard_cob(l: int, remove_condon_shortley=True) -> torch.Tensor:  # noqa: E741
-    ms = torch.tensor(list(qe_to_standard_m(l)))
+def qe_to_standard_cob(
+    l: int, remove_condon_shortley=True, dtype=None
+) -> torch.Tensor:  # noqa: E741
+    ms = torch.tensor(list(qe_to_standard_m(l)), dtype=dtype)
     if remove_condon_shortley:
         prefac = (-1) ** (ms)
     else:
         prefac = torch.ones(2 * l + 1)
 
     ind_order = torch.argsort(ms)
-    cob = prefac * torch.nn.functional.one_hot(ind_order).to(dtype=torch.get_default_dtype())
+    cob = prefac * torch.nn.functional.one_hot(ind_order).to(dtype=dtype)
     return cob.T
 
 
 def qe_to_standard(
     l: int, ylm: torch.Tensor, remove_condon_shortley=True  # noqa: E741
 ) -> torch.Tensor:
-    cob = qe_to_standard_cob(l, remove_condon_shortley)
+    cob = qe_to_standard_cob(l, remove_condon_shortley, dtype=ylm.dtype)
     return ylm @ cob
 
 
-def qe_to_e3_cob(l: int) -> torch.Tensor:  # noqa: E741
+def qe_to_e3_cob(l: int, dtype=None) -> torch.Tensor:  # noqa: E741
     # Here we exploit the fact that these are orthogonal matrices so A^-1 = A^T allows us to quickly
     # get the transformation from 'standard' real spherical harmonics to e3nn's convention
-    return qe_to_standard_cob(l) @ e3_to_standard_cob(l).T
+    return qe_to_standard_cob(l, dtype=dtype) @ e3_to_standard_cob(l, dtype=dtype).T
 
 
 def qe_to_e3(l: int, ylm: torch.Tensor) -> torch.Tensor:  # noqa: E741
-    return ylm @ qe_to_e3_cob(l)
+    return ylm @ qe_to_e3_cob(l, dtype=ylm.dtype)
 
 
 class QeOccuMtx(e3psi.OccuMtx):
@@ -84,8 +86,8 @@ class QeOccuMtx(e3psi.OccuMtx):
         dtype = dtype or torch.get_default_dtype()
 
         # First perform the change of basis from QE to e3nn
-        cob = qe_to_e3_cob(self._occ_irrep.l).to(
-            dtype=dtype, device=device
+        cob = qe_to_e3_cob(self._occ_irrep.l, dtype=dtype).to(
+            device=device
         )  # Get the change of basis matrix
         occ_mtx = cob.T @ torch.tensor(occ_mtx, device=device, dtype=dtype) @ cob
         # Now, create the spherical tensor

@@ -1,4 +1,4 @@
-seed: 0xDEADBEEF
+seed: 0 #xDEADBEEF
 dtype: float32
 device: cuda
 
@@ -27,7 +27,7 @@ optimiser:
 scheduler:
   _target_: torch.optim.lr_scheduler.StepLR
   _partial_: true  # Need to pass this the optimiser so only partially construct
-  step_size: 2000
+  step_size: 1000
   gamma: 0.5
 
 trainer:
@@ -39,7 +39,7 @@ trainer:
 
 train:
   min_epochs: 0
-  max_epochs: 10_000
+  max_epochs: 6_000
   batch_size: 256
 
 

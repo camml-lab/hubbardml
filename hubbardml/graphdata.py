@@ -84,7 +84,7 @@ class GraphData:
         for identifier, group, similarity_frame in self.get_similarity_frames(group_by):
             _LOGGER.info("Identifying duplicates in %s", identifier)
             dups = self._graph.identify_duplicates_(
-                dataset.loc[group.index], similarity_frame, **kwargs
+                dataset.loc[group.index].copy(), similarity_frame, **kwargs
             )
 
             # Update the dataset with results from dups

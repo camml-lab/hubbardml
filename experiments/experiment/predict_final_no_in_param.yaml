@@ -8,11 +8,11 @@ prepare_data:
   training_split: 0.2
   group_by:
     - species
-    - sc_paths
+#    - sc_paths
 
 graph:
   with_param_in: False
 
-train:
-  batch_size: 256
-  max_epochs: 20_000
+#train:
+#  batch_size: 256
+#  max_epochs: 20_000

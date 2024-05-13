@@ -13,12 +13,10 @@ import torch.utils.data
 import torch.optim.lr_scheduler
 
 import hubbardml.utils
-from hubbardml import datasets
 from hubbardml import engines
 from hubbardml import graphs
 from hubbardml import keys
 from hubbardml import models
-from hubbardml import plots
 from hubbardml import training
 
 import utils
@@ -149,7 +147,7 @@ def do_train(
     dataset.to_excel(output_dir / "dataset.ods", engine="odf")
 
     # Perform the analysis and create plots
-    analyse(dataset, output_dir, trainer=trainer)
+    utils.analyse_results(dataset, output_dir, trainer=trainer)
 
     return trainer
 
@@ -183,81 +181,6 @@ def get_hubbard_datasets(
     return train_data, validate_data
 
 
-def analyse(
-    df: pd.DataFrame,
-    output_path: Union[pathlib.Path, str] = ".",
-    trainer: training.Trainer = None,
-):
-    if keys.PARAM_OUT_PREDICTED not in df:
-        raise RuntimeError("The predicted parameter values must be set before calling analyse()")
-
-    _LOGGER.info("Performing analysis and storing to: %s", output_path)
-
-    plots_path = pathlib.Path(output_path) / "plots"
-    plots_path.mkdir(exist_ok=True)
-
-    plot_format = "pdf"
-
-    def _plot_path(plot_name: str) -> pathlib.Path:
-        path = plots_path / f"{plot_name}.{plot_format}"
-        return path
-
-    if trainer is not None:
-        # TRAINING CURVE
-        training_fig = trainer.plot_training_curves(logscale=True)
-        training_fig.savefig(_plot_path("training_curve"), bbox_inches="tight")
-
-    #  PARITY PLOTS
-    for param_type in df[keys.PARAM_TYPE].unique():
-        param_frame = df[df[keys.PARAM_TYPE] == param_type]
-        validate_rmse = datasets.rmse(param_frame, training_label=keys.VALIDATE)
-        # Calculate the holdout percentage
-        frac = 1.0 - len(param_frame[param_frame[keys.TRAINING_LABEL] == keys.TRAIN]) / len(
-            param_frame
-        )
-
-        parity_fig = plots.create_parity_plot(
-            param_frame,
-            axis_label=f"Hubbard ${param_type}$ (eV)",
-            title=f"RMSE = {_to_mev_string(validate_rmse)} ({frac:.2f} holdout)",
-        )
-        parity_fig.savefig(_plot_path("parity"), bbox_inches="tight")
-
-        for training_label in param_frame[keys.TRAINING_LABEL].unique():
-            if training_label is None:
-                continue
-
-            subset = param_frame[param_frame[keys.TRAINING_LABEL] == training_label]
-
-            # VALIDATE BY SPECIES
-            parity_species_fig = plots.split_plot(
-                subset,
-                keys.LABEL,
-                axis_label=f"Hubbard ${param_type}$ (eV)",
-                title=f"{training_label}".capitalize(),
-            )
-            parity_species_fig.gca().set_xlabel(f"Hubbard ${param_type}$ from DFPT (eV)")
-            parity_species_fig.savefig(
-                _plot_path(f"parity_{training_label}_species"), bbox_inches="tight"
-            )
-
-            plots.plot_param_histogram(
-                subset, param_col=keys.PARAM_OUT_RELATIVE_ERROR, x_label="Relative error"
-            ).savefig(_plot_path(f"relative_error_{training_label}"), bbox_inches="tight")
-
-    # Iteration progression
-    num_cols = 6
-    num_rows = 5
-    progression_plot = plots.create_progression_plots(
-        df,
-        yrange=0.4,
-        num_cols=num_cols,
-        max_plots=num_cols * num_rows,
-        scale=0.55,
-    )
-    progression_plot.savefig(_plot_path("convergence"), bbox_inches="tight")
-
-
 def infer(
     model,
     frame: pd.DataFrame,
@@ -286,10 +209,6 @@ def infer(
     )
 
     return frame
-
-
-def _to_mev_string(energy):
-    return f"{energy * 1000:.0f} meV"
 
 
 class SchedulerListener(training.TrainerListener):

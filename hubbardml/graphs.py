@@ -157,7 +157,9 @@ class Site(sites.Site):
     def qe_to_e3(self, occu_mtx: torch.Tensor) -> torch.Tensor:
         """Convert from QE to e3nn convention for spherical harmonics"""
         occu_mtx = torch.tensor(occu_mtx, dtype=torch.get_default_dtype())
-        cob = qe.qe_to_e3_cob(self._occ_irrep.l)  # Get the change of basis matrix
+        cob = qe.qe_to_e3_cob(
+            self._occ_irrep.l, dtype=occu_mtx.dtype
+        )  # Get the change of basis matrix
         return cob.T @ occu_mtx @ cob
         # return cob @ occu_mtx @ cob.T
 

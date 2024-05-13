@@ -1,5 +1,7 @@
+import collections.abc
 import itertools
 import math
+from typing import Dict
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -282,7 +284,7 @@ def plot_training_curves(training_run: pd.DataFrame, logscale=True) -> plt.Figur
         ax,
         training_run[keys.EPOCH],
         training_run[keys.TRAIN_LOSS],
-        label="Train",
+        label="Training",
         color=train_validate_colours[keys.TRAIN],
         size=5,
         # alpha=0.8,
@@ -300,7 +302,7 @@ def plot_training_curves(training_run: pd.DataFrame, logscale=True) -> plt.Figur
             ax,
             training_run[keys.EPOCH],
             training_run[keys.VALIDATE_LOSS],
-            label="Validate",
+            label="Validation",
             color=train_validate_colours[keys.VALIDATE],
             size=5,
         )
@@ -316,36 +318,63 @@ def plot_training_curves(training_run: pd.DataFrame, logscale=True) -> plt.Figur
 def plot_param_histogram(
     df: pd.DataFrame,
     x_label: str = "Hubbard param. (eV)",
-    y_label: str = "Frequency",
+    y_label: str = None,
     title: str = None,
     param_col: str = keys.PARAM_OUT,
     bins=20,
+    labels: Dict[str, str] = None,
+    density=True,
+    group_by=keys.SPECIES,
+    hist_type="stepfilled",
+    stacked=False,
 ) -> plt.Figure:
     """Plot a histogram of the Hubbard parameter values, split by element"""
+    y_label = y_label or "Frequency" if density else "Count"
+
+    labels = labels or {}
     fig, ax = plt.subplots()
     fig.suptitle(title)
 
+    minval = df[param_col].min()
+    maxval = df[param_col].max()
+    binwidth = (maxval - minval) / bins
+    bins_ = np.arange(minval, maxval + binwidth, binwidth)
+
     kwargs = dict(
-        histtype="stepfilled",
+        histtype=hist_type,
         alpha=0.8,
-        density=True,
-        bins=bins,
+        density=density,
         ec="k",
-        stacked=True,
+        stacked=stacked,
         # log=True,
     )
-    for species, frame in df.groupby(keys.SPECIES):
-        ax.hist(
-            frame[param_col],
-            color=frame.iloc[0][keys.COLOUR],
-            label="-".join(species),
-            **kwargs,
-        )
+    values = []
+    labels = []
+    colours = []
+    for species, frame in df.groupby(group_by):
+        vals, bins = np.histogram(frame[param_col], bins=bins_)
+        values.append(vals)
+        if isinstance(species, str):
+            group_label = species
+        else:
+            group_label = "-".join(species)
+        group_label += f" (avg {frame[param_col].mean():.3f})"
+        labels.append(group_label)
+        colours.append(frame.iloc[0][keys.COLOUR])
+
+    ax.hist(
+        np.expand_dims(bins[:-1], axis=1).repeat(len(labels), axis=1),
+        bins,
+        weights=np.vstack(values).T,
+        color=colours,
+        label=labels,
+        **kwargs,
+    )
 
     if x_label:
         ax.set_xlabel(x_label)
     if y_label:
         ax.set_ylabel(y_label)
-    fig.legend()
+    ax.legend()
 
     return fig

@@ -7,6 +7,7 @@ trainer:
   overfitting_window: 100
 
 train:
+  min_epochs: 800
   max_epochs: 6_000
   batch_size: 8
 
