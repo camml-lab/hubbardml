@@ -30,6 +30,7 @@ dependencies = [
     "e3psi~=0.3",
     "hydra-core",
     "matplotlib",
+    "meson",
     "mincepy[sci]",
     "numpy",
     "pandas",

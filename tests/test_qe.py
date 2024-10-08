@@ -1,4 +1,5 @@
 import math
+import pathlib
 import subprocess
 import types
 
@@ -10,14 +11,17 @@ import torch
 from hubbardml import qe
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def qe_module() -> types.ModuleType:
     try:
         import ylmr2
     except ImportError:
-        command = list("f2py -c ylmr2.f90 -m ylmr2".split(" "))
+        cwd = pathlib.Path(__file__).parent.absolute()
+        in_path = cwd / "ylmr2.f90"
+
+        command = list(f"f2py -c {in_path} -m ylmr2 --build-dir {cwd}".split(" "))
         subprocess.run(command)
-        import ylmr2
+        from tests import ylmr2
 
     return ylmr2
 
@@ -39,14 +43,14 @@ def test_qe_cob(qe_module: types.ModuleType):
     lmax = 10
     ylm_outs = qe_module.ylmr2((lmax + 1) ** 2, np.array(pts, order="F").T, np.ones(len(pts)))
 
-    for l in range(lmax + 1):
-        l2 = l**2
-        next_l2 = (l + 1) ** 2
-        e3_ylm = o3.spherical_harmonics(l, pts, True)  # From e3nn
-        e3_ylm_standard = qe.e3_to_standard(l, e3_ylm)
+    for ell in range(lmax + 1):
+        l2 = ell**2
+        next_l2 = (ell + 1) ** 2
+        e3_ylm = o3.spherical_harmonics(ell, pts, True)  # From e3nn
+        e3_ylm_standard = qe.e3_to_standard(ell, e3_ylm)
 
         qe_ylm = torch.tensor(ylm_outs[:, l2:next_l2], dtype=e3_ylm.dtype)  # From QE
-        qe_ylm_standard = qe.qe_to_standard(l, qe_ylm)
+        qe_ylm_standard = qe.qe_to_standard(ell, qe_ylm)
 
         assert torch.allclose(qe_ylm_standard, e3_ylm_standard, atol=1e-5)
 
@@ -56,12 +60,12 @@ def test_qe_to_e3(qe_module: types.ModuleType):
     lmax = 10
     ylm_outs = qe_module.ylmr2((lmax + 1) ** 2, np.array(pts, order="F").T, np.ones(len(pts)))
 
-    for l in range(lmax + 1):
-        l2 = l**2
-        next_l2 = (l + 1) ** 2
-        e3_ylm = o3.spherical_harmonics(l, pts, True)  # From e3nn
+    for ell in range(lmax + 1):
+        l2 = ell**2
+        next_l2 = (ell + 1) ** 2
+        e3_ylm = o3.spherical_harmonics(ell, pts, True)  # From e3nn
 
         qe_ylm = torch.tensor(ylm_outs[:, l2:next_l2], dtype=e3_ylm.dtype)  # From QE
-        qe_ylm_e3 = qe.qe_to_e3(l, qe_ylm)
+        qe_ylm_e3 = qe.qe_to_e3(ell, qe_ylm)
 
         assert torch.allclose(qe_ylm_e3, e3_ylm, atol=1e-5)
