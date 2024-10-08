@@ -1,0 +1,23 @@
+defaults:
+  - config
+  - _self_
+
+species:
+  - Mn
+
+trainer:
+  # Use high overfitting window as training curves for this experiment can be chaotic
+  overfitting_window: 100
+
+train:
+  min_epochs: 800
+  max_epochs: 6_000
+  batch_size: 4
+
+
+hydra:
+  run:
+    dir: outputs/mno2/batch_size=${train.batch_size},max_epochs=${train.max_epochs}/${now:%Y-%m-%d}_${now:%H-%M-%S}
+  sweep:
+    dir: outputs/mno2/
+    subdir: ${hydra.job.override_dirname}/${now:%Y-%m-%d}_${now:%H-%M-%S}

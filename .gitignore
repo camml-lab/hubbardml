@@ -446,3 +446,8 @@ notebooks/
 data/
 experiments/outputs/
 experiments/plots/
+
+*arrow
+
+
+.vscode
