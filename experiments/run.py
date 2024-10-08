@@ -36,8 +36,8 @@ AUTO_BATCH_LIMIT = 2048
 
 def checkpoint(trainer: training.Trainer, output_dir: pathlib.Path):
     _LOGGER.info(trainer.status())
-    torch.save(trainer, output_dir / TRAINER)
-    torch.save(trainer.model, output_dir / MODEL)
+    torch.save(trainer, output_dir / TRAINER)  # nosec B614
+    torch.save(trainer.model, output_dir / MODEL)  # nosec B614
 
 
 def init_data(cfg: omegaconf.DictConfig) -> hubbardml.GraphData:

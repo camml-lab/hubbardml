@@ -68,9 +68,9 @@ def train_iterations(cfg: omegaconf.DictConfig) -> None:
             group_by=[keys.SPECIES, keys.SC_PATHS],
         )
         # Copy over the duplicates label to our set
-        data.loc[
-            dups[dups[keys.TRAINING_LABEL] == keys.DUPLICATE].index, keys.TRAINING_LABEL
-        ] = keys.DUPLICATE
+        data.loc[dups[dups[keys.TRAINING_LABEL] == keys.DUPLICATE].index, keys.TRAINING_LABEL] = (
+            keys.DUPLICATE
+        )
 
         # Now, calculate the reference RMSE on the de-duplicated validation set
         ref_rmse = datasets.rmse(data)

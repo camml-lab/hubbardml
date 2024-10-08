@@ -40,9 +40,9 @@ def prepare_data(
         tolerances=duplicate_tolerances,
     )
     # Copy over the duplicates label to our set
-    dataset.loc[
-        dups[dups[keys.TRAINING_LABEL] == keys.DUPLICATE].index, keys.TRAINING_LABEL
-    ] = keys.DUPLICATE
+    dataset.loc[dups[dups[keys.TRAINING_LABEL] == keys.DUPLICATE].index, keys.TRAINING_LABEL] = (
+        keys.DUPLICATE
+    )
 
     return dataset
 

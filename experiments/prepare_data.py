@@ -52,9 +52,5 @@ def train(cfg: omegaconf.DictConfig) -> None:
     utils.analyse_dataset(graph_data, output_dir)
 
 
-def create_similarities(dataframe):
-    
-
-
 if __name__ == "__main__":
     train()

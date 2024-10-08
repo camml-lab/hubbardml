@@ -51,9 +51,11 @@ class UModel(e3psi.models.OnsiteModel):
 
     def _compress_non_scalars(self, irreps: o3.Irreps, factor=3.0) -> o3.Irreps:
         return o3.Irreps(
-            o3._irreps._MulIr(int(math.ceil(float(mul_ir.mul) / factor)), mul_ir.ir)
-            if mul_ir.ir.l != 0
-            else mul_ir
+            (
+                o3._irreps._MulIr(int(math.ceil(float(mul_ir.mul) / factor)), mul_ir.ir)
+                if mul_ir.ir.l != 0
+                else mul_ir
+            )
             for mul_ir in irreps
         )
 

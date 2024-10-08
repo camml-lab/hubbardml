@@ -71,9 +71,9 @@ def _split_by_cluster(
 
     # Label duplicates of validation rows as duplicates so that they don't skew the stats when calculating validation
     # losses
-    dataset.loc[
-        dataset[similarities.CLUSTER_ID].isin(validation_ids), keys.TRAINING_LABEL
-    ] = keys.DUPLICATE
+    dataset.loc[dataset[similarities.CLUSTER_ID].isin(validation_ids), keys.TRAINING_LABEL] = (
+        keys.DUPLICATE
+    )
     for cluster_id in validation_ids:
         dataset.loc[
             dataset[dataset[similarities.CLUSTER_ID] == cluster_id].first_valid_index(),
@@ -95,9 +95,9 @@ def split_by_cluster(
 
         # Label duplicates of validation rows as duplicates so that they don't skew the stats when calculating
         # validation losses
-        dataset.loc[
-            dataset[similarities.CLUSTER_ID].isin(validation_ids), keys.TRAINING_LABEL
-        ] = keys.DUPLICATE
+        dataset.loc[dataset[similarities.CLUSTER_ID].isin(validation_ids), keys.TRAINING_LABEL] = (
+            keys.DUPLICATE
+        )
         for cluster_id in validation_ids:
             dataset.loc[
                 frame[frame[similarities.CLUSTER_ID] == cluster_id].first_valid_index(),
