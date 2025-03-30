@@ -10,13 +10,13 @@
 
 This repository contains source code for our machine learning model for predicting self-consistent Hubbard parameters, as presented in this work:
 
-Uhrin, M., Zadoks, A., Binci, L., Marzari, N., & Timrov, I. (2024). Machine learning Hubbard parameters with equivariant neural networks. http://arxiv.org/abs/2406.02457
+Uhrin, M., Zadoks, A., Binci, L., Marzari, N., & Timrov, I. (2025). Machine learning Hubbard parameters with equivariant neural networks. Npj Computational Materials, 11(1), 19. [https://doi.org/10.1038/s41524-024-01501-5i](https://www.nature.com/articles/s41524-024-01501-5)
 
 The experiments carried out in this work can be found in the `experiments/` folder along with all the notebooks to generate the plots.
 
 As an example, from experiments you can use:
 
-`python run.py experiment=predict_hp model=u`
+    python run.py experiment=predict_hp model=u
 
 to run an experiment that trains a model to predict Hubbard U values from a linear-response dataset.
 
